@@ -1,0 +1,57 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v10.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v10.0": {
+      "KSAGEffects/1.0.0": {
+        "dependencies": {
+          "Lib.Harmony": "2.4.2",
+          "StarMap.API": "0.3.4"
+        },
+        "runtime": {
+          "KSAGEffects.dll": {}
+        }
+      },
+      "Lib.Harmony/2.4.2": {
+        "runtime": {
+          "lib/net10.0/0Harmony.dll": {
+            "assemblyVersion": "2.4.2.0",
+            "fileVersion": "2.4.2.0"
+          }
+        }
+      },
+      "StarMap.API/0.3.4": {
+        "runtime": {
+          "lib/net10.0/StarMap.API.dll": {
+            "assemblyVersion": "0.3.4.0",
+            "fileVersion": "0.3.4.0"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "KSAGEffects/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Lib.Harmony/2.4.2": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-D2X9ojVjqbqdqWVK3VQETrEb56yVoXxtEp6tP5UvW0PP+bA4uJiswqOxF8GhH02ECwyevUa9vwhwdLzyXfksbw==",
+      "path": "lib.harmony/2.4.2",
+      "hashPath": "lib.harmony.2.4.2.nupkg.sha512"
+    },
+    "StarMap.API/0.3.4": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-y58PJ1kLxto91lhUzugkYQvIAX1Z/ZhbHrMzyFfXHyoWKplPPr+PUOmLIoIkFP5FhoZBv7TGzQgnJ8WcQzhBEA==",
+      "path": "starmap.api/0.3.4",
+      "hashPath": "starmap.api.0.3.4.nupkg.sha512"
+    }
+  }
+}
