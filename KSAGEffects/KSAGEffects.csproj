@@ -7,78 +7,85 @@
 		<TargetFrameworkVersion>net10.0</TargetFrameworkVersion>
 		<LanguageTargets>$(MSBuildToolsPath)\Microsoft.CSharp.targets</LanguageTargets>
 		<AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-		<LangVersion>14.0</LangVersion>
+		<LangVersion>latest</LangVersion>
 		<OutputPath>bin\$(Configuration)</OutputPath>
 		<AssemblyName>$(ModName)</AssemblyName>
 		<OutputType>Library</OutputType>
-		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<Configurations>Debug;Release;PerfDebug</Configurations>
+		<AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+
+		<VersionPrefix>0.1.0</VersionPrefix>
+		<Version>$(VersionPrefix)</Version>
+		<AssemblyVersion>0.1.0.0</AssemblyVersion>
+		<FileVersion>$(VersionPrefix).0</FileVersion>
+
+		<GitShortHash>nogit</GitShortHash>
+		<InformationalVersionPostfix></InformationalVersionPostfix>
+		<IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+
+		<Company>AMPW</Company>
+		<Authors>AMPW</Authors>
+		<Copyright>GNU GPL v3.0</Copyright>
 	</PropertyGroup>
-	<PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
-		<DebugSymbols>true</DebugSymbols>
-		<DebugType>portable</DebugType>
-		<Optimize>false</Optimize>
-		<DefineConstants>DEBUG;TRACE</DefineConstants>
-		<ErrorReport>prompt</ErrorReport>
-		<WarningLevel>4</WarningLevel>
-		<Prefer32Bit>false</Prefer32Bit>
+
+	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+		<DebugType>none</DebugType>
 	</PropertyGroup>
-	<PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
-		<DebugType>pdbonly</DebugType>
-		<Optimize>true</Optimize>
-		<DefineConstants>TRACE</DefineConstants>
-		<ErrorReport>prompt</ErrorReport>
-		<WarningLevel>4</WarningLevel>
-		<Prefer32Bit>false</Prefer32Bit>
+
+	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='PerfDebug|AnyCPU'">
+		<DefineConstants>$(DefineConstants);DEBUG</DefineConstants>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(Configuration)'=='Debug'">
+		<InformationalVersionPostfix>-debug</InformationalVersionPostfix>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(Configuration)'=='PerfDebug'">
+		<InformationalVersionPostfix>-perfDebug</InformationalVersionPostfix>
 	</PropertyGroup>
 
 	<ItemGroup>
-	<PackageReference Include="Lib.Harmony" Version="2.4.2" />
-	<PackageReference Include="StarMap.API" Version="0.3.4" />
+		<PackageReference Include="StarMap.API" Version="0.3.4" />
 	</ItemGroup>
 
 	<ItemGroup>
-	<Reference Include="KittenExtensions">
-		<HintPath>D:\programms\Kitten Space Agency\Content\KittenExtensions\KittenExtensions.dll</HintPath>
-		<Private>False</Private>
-	</Reference>
+	  <ProjectReference Include="..\..\GEffectsLogic\GEffectsLogic\GEffectsLogic.csproj" />
 	</ItemGroup>
 
 	<ItemGroup>
-	<None Update="GEffectAssests.xml">
-		<CopyToOutputDirectory>Always</CopyToOutputDirectory>
-	</None>
-	<None Update="Shaders\Blur.frag">
-	  <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-	</None>
-	<None Update="Shaders\GEffectShader.frag">
-		<CopyToOutputDirectory>Always</CopyToOutputDirectory>
-	</None>
-	<None Update="mod.toml">
-		<CopyToOutputDirectory>Always</CopyToOutputDirectory>
-	</None>
-	<None Update="Shaders\GEffectShader2.frag">
-	  <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-	</None>
-	<None Update="Shaders\GreyScaleFrag.frag">
-	  <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-	</None>
-	<None Update="Shaders\Tint.frag">
-	  <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-	</None>
+		<Reference Include="KittenExtensions">
+			<HintPath>..\..\..\..\Documents\My Games\Kitten Space Agency\mods\KittenExtensions\KittenExtensions.dll</HintPath>
+			<Private>False</Private>
+		</Reference>
 	</ItemGroup>
 
-	<Target Name="CopyOutputToExternalFolder" AfterTargets="Build">
-	<PropertyGroup>
-		<ExternalFolder>$(SolutionDir)Content\KSAGEffects\</ExternalFolder>
-	</PropertyGroup>
-
-	<!-- Capture all files WITH folder structure -->
 	<ItemGroup>
-		<FilesToCopy Include="$(OutputPath)**\*" />
+		<None Update="GEffectAssests.xml">
+			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
+		</None>
+		<None Update="Shaders\**\*.*">
+			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
+		</None>
+		<None Update="mod.toml">
+			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
+		</None>
 	</ItemGroup>
+	
+	<Target Name="SetVersionMetadata" BeforeTargets="GetAssemblyVersion">
+		<Exec Command="git rev-parse --short HEAD" ConsoleToMSBuild="true" IgnoreExitCode="true" IgnoreStandardErrorWarningFormat="true">
+		<Output TaskParameter="ConsoleOutput" PropertyName="GitShortHashRaw" />
+		</Exec>
 
-	<!-- Copy while preserving subfolders -->
-	<Copy SourceFiles="@(FilesToCopy)" DestinationFiles="@(FilesToCopy->'$(ExternalFolder)%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" />
-
+		<PropertyGroup>
+		<GitShortHash Condition="'$(GitShortHashRaw)' != ''">$([System.String]::Copy('$(GitShortHashRaw)').Trim())</GitShortHash>
+		<GitShortHash Condition="'$(GitShortHash)' == ''">nogit</GitShortHash>
+		<InformationalVersion>v$(VersionPrefix).$(GitShortHash)$(InformationalVersionPostfix)</InformationalVersion>
+		<ProductVersion>$(InformationalVersion)</ProductVersion>
+		</PropertyGroup>
 	</Target>
+
+	<Import Project="CopyOutput.targets" />
 </Project>
