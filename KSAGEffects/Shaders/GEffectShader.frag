@@ -7,9 +7,10 @@ layout(location = 0) out vec4 outColor;
    set = 1, binding = 0
 */
 layout(set = 1, binding = 0, input_attachment_index = 0) uniform subpassInput Source;
-layout(set = 1, binding = 1) uniform TestBuffer {
-  float v1;
-  float v2;
+layout(set = 1, binding = 1) uniform GEffectBuffer {
+  float grayScaleLevel;
+  float tunnelVisionLevel;
+  float screensizeAdjustment;
 };
 
 /* From ScreenspaceVert */
@@ -26,31 +27,74 @@ vec3 desaturate(vec3 color, float amount)
     return mix(color, vec3(l), clamp(amount, 0.0, 1.0));
 }
 
-float vignette(vec2 uv, float amount)
+float cinematicVignette(vec2 uv, float amount, float aspectAdjust)
 {
-    // amount: 0 = no vignette, 1 = vignette reaches center
     amount = clamp(amount, 0.0, 1.0);
 
-    vec2 centered = uv - 0.5;
-    float dist = length(centered);
+    // Early out avoids tiny residuals at amount=0
+    if (amount <= 0.0)
+        return 0.0;
 
-    // Max distance from center to corner (≈ 0.707)
-    float maxDist = 0.7071;
+    // Centered coordinates
+    vec2 p = uv - 0.5;
 
-    // Where vignette starts
-    float innerRadius = mix(maxDist, 0.0, amount);
+    // Aspect correction for oval shape
+    p.y *= aspectAdjust;
 
-    // Softness of the edge
-    float softness = 0.2 * maxDist;
+    // Distance from center
+    float d = length(p);
 
-    return smoothstep(innerRadius, innerRadius - softness, dist);
+    // --------------------------------------------
+    // Vignette shape control
+    // --------------------------------------------
+
+    // Keep a minimum visible center area.
+    // Even at amount=1 the vignette itself
+    // never fully closes.
+    const float minOuterRadius = 0.15;
+
+    // Outer radius shrinks with amount:
+    // starts near corners, then closes inward
+    float outerRadius = mix(0.72, minOuterRadius, pow(amount, 1.15));
+
+    // Fade width:
+    // very thin initially, broader later
+    float fadeWidth = mix(0.015, 0.35, pow(amount, 1.6));
+
+    // Inner radius derived from width
+    float innerRadius = max(outerRadius - fadeWidth, 0.0);
+
+    // Smooth vignette
+    float vignette = smoothstep(innerRadius, outerRadius, d);
+
+    // --------------------------------------------
+    // Additional fullscreen darkening at high amount
+    // --------------------------------------------
+
+    // Starts appearing around 0.8
+    float globalDarkening =
+        smoothstep(0.80, 1.00, amount);
+
+    // Strength curve for softer transition
+    globalDarkening *= 0.75;
+
+    // Combine:
+    // global darkening lifts the minimum darkness
+    float darkness = max(vignette, globalDarkening);
+
+    // Ensure exact full black at amount=1
+    darkness = mix(darkness, 1.0, smoothstep(0.98, 1.0, amount));
+
+    return clamp(darkness, 0.0, 1.0);
 }
 
 void main()
 {
     vec4 c = subpassLoad(Source);
 
-    vec3 color = desaturate(c.rgb, v1); // full grayscale
+    vec3 color = desaturate(c.rgb, grayScaleLevel); // full grayscale
+    vec3 vignetteColor = vec3(0.0); // black vignette
+    color = mix(color, vignetteColor, cinematicVignette(v_Uv, tunnelVisionLevel, screensizeAdjustment));
 
     outColor = vec4(color, 1);
 }

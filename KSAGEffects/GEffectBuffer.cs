@@ -28,8 +28,9 @@ namespace KSAGEffects
     [SxUniformBuffer("GEffectBuffer")]
     public struct GEffectBuffer
     {
-        public float V1;
-        public float V2;
+        public float GrayScaleLevel;
+        public float TunnelVisionLevel;
+        public float ScreenSizeAdjustment;
 
         // lookup delegate fields must be static fields on the buffer element type
         // the names and specific types of these are not relevant, as long as the delegate signature matches

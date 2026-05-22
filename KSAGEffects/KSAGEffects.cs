@@ -1,6 +1,5 @@
 ﻿using Brutal.ImGuiApi;
 using Brutal.Numerics;
-using GEffectsLogic;
 using HarmonyLib;
 using KSA;
 using KSAGEffects.Logging;
@@ -58,6 +57,9 @@ namespace KSAGEffects
 
             double dt = __instance.SimStep.DeltaTime;
             if (dt <= 0) return;
+            // Gets unreliable over 120x time warp
+            // It's assumed that at such high time warps no active maneuvers are happening
+            // Update paused vehicles need to be implemented to fix the high time warp issue
 
             List<Vehicle> vehicles = vehicleStates.Select(vs => vs.ReadOnlyVehicle).ToList();
             vehicles.Where(v => v.BubbleLeader == v).ToList().ForEach(v => vehicles.AddRange(v.NearbyVehicles));
@@ -67,12 +69,23 @@ namespace KSAGEffects
         }
 
         public static double StandardGravity => KSA.Constants.STANDARD_GRAVITY;
+        public static float vignetteShape = 2.0f; // 1.0 is circular, higher streches it into an oval
+        public static float screenSizeAdjustment = 1.0f; // Screen ratio adjustment for the vignette effect, includes vignetteShape
+        public static float edgeDistance = 1.0f;
 
         private bool showDebugWindow = true;
         [StarMapAfterGui]
         public void AfterGui(double dt)
         {
             if (!showDebugWindow) return;
+
+            if (GEffectBuffer.LookupSpan != null)
+            {
+                float2 screenSize = new float2(Program.MainViewport.Size.X, Program.MainViewport.Size.Y);
+
+                Span<GEffectBuffer> data = GEffectBuffer.LookupSpan(KeyHash.Make("GEffectBuffer"));
+                data[0].ScreenSizeAdjustment = vignetteShape * screenSize.Y / screenSize.X;
+            }
 
             // Create a debug window for showing g forces and calculated effect parameters
             if (ImGui.Begin("G Effects debug window", ref showDebugWindow))
@@ -83,23 +96,28 @@ namespace KSAGEffects
                 if (activeVehicle != null)
                 {
                     instances.Remove(activeVehicle.Id);
-
-                    float t = activeVehicle.GetManualThrottle();
+                    NamedGEffectsLogicInstance instance = GetLogicInstance(activeVehicle.Id) ?? new NamedGEffectsLogicInstance(activeVehicle.Id);
 
                     if (GEffectBuffer.LookupSpan != null)
                     {
+                        //float value = 1.0f - (activeVehicle.GetManualThrottle() - 0.01f) * 1.0101f;
                         Span<GEffectBuffer> data = GEffectBuffer.LookupSpan(KeyHash.Make("GEffectBuffer"));
-                        data[0].V1 = t;
-                        data[0].V2 = t;
+                        data[0].GrayScaleLevel = (float)instance.GreyScaleLevel;
+                        data[0].TunnelVisionLevel = (float)instance.TunnelVisionLevel;
                     }
 
-                    NamedGEffectsLogicInstance? instance = GetLogicInstance(activeVehicle.Id);
-                    if (instance != null)
+                    ImGui.Text($"Effect parameters for vehicle {activeVehicle.Id}:");
+                    ImGui.Text($"Gz: {instance.LastGz:f4}");
+                    ImGui.Text($"Consciousness level: {instance.ConsciousnessLevel:f4}");
+                    ImGui.Text($"Vision level: {instance.GreyScaleLevel:f4}");
+                }
+                else
+                {
+                    if (GEffectBuffer.LookupSpan != null)
                     {
-                        ImGui.Text($"Effect parameters for vehicle {activeVehicle.Id}:");
-                        ImGui.Text($"Gz: {instance.LastGz:f4}");
-                        ImGui.Text($"Consciousness level: {instance.ConsciousnessLevel:f4}");
-                        ImGui.Text($"Vision level: {instance.GreyScaleLevel:f4}");
+                        Span<GEffectBuffer> data = GEffectBuffer.LookupSpan(KeyHash.Make("GEffectBuffer"));
+                        data[0].GrayScaleLevel = 0f;
+                        data[0].TunnelVisionLevel = 0f;
                     }
                 }
 
