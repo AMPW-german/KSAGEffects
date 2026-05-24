@@ -73,6 +73,9 @@
 		<None Update="Shaders\**\*.*">
 			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
 		</None>
+		<None Update="Patches\**\*.*">
+			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
+		</None>
 		<None Update="mod.toml">
 			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
 		</None>

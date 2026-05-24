@@ -8,7 +8,7 @@ namespace KSAGEffects.Logging
 
         public override bool LogStr(string message, int id, LogLevel level = LogLevel.Debug)
         {
-            string name = NamedGEffectsLogicInstance.GetInstanceName(id);
+            string name = KSAGEffectsLogicInstance.GetInstanceName(id);
 
             switch (level)
             {

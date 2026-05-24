@@ -1,0 +1,14 @@
+<Patch>
+  <With Path="//SubPartGameData[@Id='CorePropulsionA_Subpart_EngineALargeVacAssembly_Dev']">
+    <!-- Combustor -->
+    <Copy Path="Combustor[@Id='ThrustChamber']/MaxPressure/@Bar">16</Copy>
+    <Copy Path="Combustor[@Id='ThrustChamber']/ThermalEfficiency/@Value">10000</Copy>
+    <Copy Path="Combustor[@Id='ThrustChamber']/MinimumThrottle/@Value">0.0</Copy>
+
+    <!-- DeLavalNozzle -->
+    <Copy Path="DeLavalNozzle[@Id='Nozzle']/ExitDiameter/@M">0.05</Copy>
+    <!-- <Copy Path="DeLavalNozzle[@Id='Nozzle']/AreaRatio/@Value">3000000</Copy> -->
+    <Copy Path="DeLavalNozzle[@Id='Nozzle']/FlowEfficiency/@Value">1</Copy>
+    <Copy Path="DeLavalNozzle[@Id='Nozzle']/ExpansionEfficiency/@Value">10000</Copy>
+  </With>
+</Patch>

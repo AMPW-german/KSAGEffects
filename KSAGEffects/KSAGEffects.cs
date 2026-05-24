@@ -13,15 +13,15 @@ namespace KSAGEffects
     public class KSAGEffects
     {
         // Vehicle IDs must be unique I think
-        public static Dictionary<string, NamedGEffectsLogicInstance> GEffectsInstances => NamedGEffectsLogicInstance.NamedInstances;
-        public static NamedGEffectsLogicInstance? GetLogicInstance(string vehicleId) => NamedGEffectsLogicInstance.NamedInstances.FirstOrDefault(kvp => kvp.Key == vehicleId).Value;
+        public static Dictionary<string, KSAGEffectsLogicInstance> GEffectsInstances => KSAGEffectsLogicInstance.NamedInstances;
+        public static KSAGEffectsLogicInstance? GetLogicInstance(string vehicleId) => KSAGEffectsLogicInstance.NamedInstances.FirstOrDefault(kvp => kvp.Key == vehicleId).Value;
 
         private static void UpdateLogicInstance(string vehicleId, double deltaTime, double3 g)
         {
             // First version uses overall g force as Gz value
             // Gx and Gy are ignored for now
             double absoluteG = g.Length();
-            NamedGEffectsLogicInstance instance = GetLogicInstance(vehicleId) ?? new NamedGEffectsLogicInstance(vehicleId);
+            KSAGEffectsLogicInstance instance = GetLogicInstance(vehicleId) ?? new KSAGEffectsLogicInstance(vehicleId);
             instance.Update(deltaTime, 0, 0, absoluteG);
         }
 
@@ -32,6 +32,7 @@ namespace KSAGEffects
             var harmony = new Harmony("KSAGEffects");
             harmony.PatchAll();
             new LogicLogging();
+            GEffectsLogic.LogicSettings.DebugMode = false;
         }
 
         // Vehicles that were not in the FullPhysics or SingleSurfaceMotion updates are (probably) in free fall in space
@@ -90,26 +91,42 @@ namespace KSAGEffects
             // Create a debug window for showing g forces and calculated effect parameters
             if (ImGui.Begin("G Effects debug window", ref showDebugWindow))
             {
-                Dictionary<string, NamedGEffectsLogicInstance> instances = new(GEffectsInstances);
+                Dictionary<string, KSAGEffectsLogicInstance> instances = new(GEffectsInstances);
 
                 Vehicle? activeVehicle = Program.ControlledVehicle;
                 if (activeVehicle != null)
                 {
                     instances.Remove(activeVehicle.Id);
-                    NamedGEffectsLogicInstance instance = GetLogicInstance(activeVehicle.Id) ?? new NamedGEffectsLogicInstance(activeVehicle.Id);
+                    KSAGEffectsLogicInstance instance = GetLogicInstance(activeVehicle.Id) ?? new KSAGEffectsLogicInstance(activeVehicle.Id);
 
-                    if (GEffectBuffer.LookupSpan != null)
-                    {
-                        //float value = 1.0f - (activeVehicle.GetManualThrottle() - 0.01f) * 1.0101f;
-                        Span<GEffectBuffer> data = GEffectBuffer.LookupSpan(KeyHash.Make("GEffectBuffer"));
-                        data[0].GrayScaleLevel = (float)instance.GreyScaleLevel;
-                        data[0].TunnelVisionLevel = (float)instance.TunnelVisionLevel;
-                    }
+                    //if (instance.ConsciousnessLevel < 0.01f)
+                    //{
+                    //    Vehicle.ControlsLockout
+                    //}
 
                     ImGui.Text($"Effect parameters for vehicle {activeVehicle.Id}:");
                     ImGui.Text($"Gz: {instance.LastGz:f4}");
                     ImGui.Text($"Consciousness level: {instance.ConsciousnessLevel:f4}");
                     ImGui.Text($"Vision level: {instance.GreyScaleLevel:f4}");
+                    if (instance.Enabled && ImGui.Button("Disable")) instance.Enabled = false;
+                    else if (!instance.Enabled && ImGui.Button("Enable")) instance.Enabled = true;
+
+                    if (GEffectBuffer.LookupSpan != null)
+                    {
+                        //float value = 1.0f - (activeVehicle.GetManualThrottle() - 0.01f) * 1.0101f;
+                        Span<GEffectBuffer> data = GEffectBuffer.LookupSpan(KeyHash.Make("GEffectBuffer"));
+
+                        if (instance.Enabled)
+                        {
+                            data[0].GrayScaleLevel = (float)instance.GreyScaleLevel;
+                            data[0].TunnelVisionLevel = (float)instance.TunnelVisionLevel;
+                        }
+                        else
+                        {
+                            data[0].GrayScaleLevel = 0f;
+                            data[0].TunnelVisionLevel = 0f;
+                        }
+                    }
                 }
                 else
                 {
@@ -121,14 +138,15 @@ namespace KSAGEffects
                     }
                 }
 
-                ImGui.BeginTable("GEffectsInstancesTable", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.Resizable);
+                ImGui.BeginTable("GEffectsInstancesTable", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.Resizable);
                 ImGui.TableSetupColumn("Vehicle ID", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 150f);
                 ImGui.TableSetupColumn("Gz", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
                 ImGui.TableSetupColumn("Consciousness", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
                 ImGui.TableSetupColumn("Vision", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
+                ImGui.TableSetupColumn("Enabled", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
                 ImGui.TableHeadersRow();
 
-                foreach (KeyValuePair<string, NamedGEffectsLogicInstance> item in instances)
+                foreach (KeyValuePair<string, KSAGEffectsLogicInstance> item in instances)
                 {
                     ImGui.TableNextRow();
                     ImGui.TableNextColumn();
@@ -144,6 +162,11 @@ namespace KSAGEffects
                     ImGui.TableNextColumn();
                     ImGui.PushID($"{item.Key}_Vision");
                     ImGui.Text($"{item.Value.GreyScaleLevel:f4}");
+                    ImGui.PopID();
+                    ImGui.TableNextColumn();
+                    ImGui.PushID($"{item.Key}_Enabled");
+                    if (item.Value.Enabled && ImGui.Button("Disable")) item.Value.Enabled = false;
+                    else if (!item.Value.Enabled && ImGui.Button("Enable")) item.Value.Enabled = true;
                     ImGui.PopID();
                 }
 
