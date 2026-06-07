@@ -69,6 +69,18 @@ namespace KSAGEffects
             vehicles.ForEach(v => UpdateLogicInstance(v.Id, dt, v.AccelerationBody / StandardGravity));
         }
 
+        [HarmonyPatch(typeof(Vehicle), "OnKey"), HarmonyPrefix]
+        public static bool Vehicle_OnKey_Prefix(Vehicle __instance)
+        {
+            KSAGEffectsLogicInstance logicInstance = GetLogicInstance(__instance.Id) ?? new KSAGEffectsLogicInstance(__instance.Id);
+
+            if (logicInstance.Enabled && logicInstance.ConsciousnessLevel < 0.05f)
+            {
+                return false;
+            }
+            return true;
+        }
+
         public static double StandardGravity => KSA.Constants.STANDARD_GRAVITY;
         public static float vignetteShape = 2.0f; // 1.0 is circular, higher streches it into an oval
         public static float screenSizeAdjustment = 1.0f; // Screen ratio adjustment for the vignette effect, includes vignetteShape
