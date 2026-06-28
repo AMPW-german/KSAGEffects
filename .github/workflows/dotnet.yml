@@ -305,7 +305,7 @@ jobs:
             --arg tag_name "${{ needs.build-package.outputs.version }}" \
             --arg name "${{ needs.build-package.outputs.version }}" \
             --arg body "Built for KSA version ${{ needs.build-package.outputs.ksa_version }}" \
-            '{ tag_name: $tag_name, name: $name, body: $body, draft: false, prerelease: false, generate_release_notes: true }')
+            '{ tag_name: $tag_name, name: $name, body: $body, draft: true, prerelease: false, generate_release_notes: true }')
 
           echo "Creating release with payload: $json_payload"
           response_file=$(mktemp)
@@ -358,7 +358,32 @@ jobs:
             exit 1
           fi
 
-          release_changelog=$(jq -r '.body // ""' "$response_file")
+          release_id=$(jq -r '.id' "$response_file")
+          if [ -z "$release_id" ] || [ "$release_id" = "null" ]; then
+            echo "Release created but id is missing in response." >&2
+            cat "$response_file" >&2
+            exit 1
+          fi
+
+          publish_payload='{"draft":false}'
+          publish_response_file=$(mktemp)
+          publish_status=$(curl -sS -L -X PATCH \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            https://api.github.com/repos/${{ github.repository }}/releases/$release_id \
+            -d "$publish_payload" \
+            -o "$publish_response_file" \
+            -w "%{http_code}")
+
+          if [ "$publish_status" -ne 200 ]; then
+            echo "Failed to publish release. Expected HTTP 200, got HTTP $publish_status." >&2
+            cat "$publish_response_file" >&2
+            exit 1
+          fi
+
+          release_changelog=$(jq -r '.body // ""' "$publish_response_file")
           {
             echo "changelog<<EOF"
             echo "$release_changelog"
