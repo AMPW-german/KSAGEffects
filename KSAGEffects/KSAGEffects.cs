@@ -42,8 +42,12 @@ namespace KSAGEffects
         // -> Run
         //  -> DoWorkAndStageResults
         //    -> ApplyFullPhysics
+        //      -> FullPhysicsPreStep
+        //      -> FullPhysicsUnconstrainedStep
         //    -> ApplySingleVehicleMotion
         //      -> ApplyFullPhysics
+        //        -> FullPhysicsPreStep
+        //        -> FullPhysicsUnconstrainedStep
         //      -> ApplySingleSurfaceMotion
 
         // Vehicle.UpdateFromTaskResults updates the vehicle's state but is lacking the delta time
@@ -53,7 +57,7 @@ namespace KSAGEffects
         {
             // Since this is a postfix the vehicle states have already been updated
 
-            List<VehicleUpdateState> vehicleStates = typeof(VehicleUpdateTask).GetField("_vehicleStates", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(__instance) as List<VehicleUpdateState>;
+            List<VehicleUpdateState> vehicleStates = typeof(VehicleUpdateTask)?.GetField("_vehicleStates", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(__instance) as List<VehicleUpdateState> ?? [];
             if (vehicleStates == null || vehicleStates.Count == 0) return;
 
             double dt = __instance.SimStep.DeltaTime;
@@ -69,16 +73,47 @@ namespace KSAGEffects
             vehicles.ForEach(v => UpdateLogicInstance(v.Id, dt, v.AccelerationBody / StandardGravity));
         }
 
+
+        // For KSA v2026.6.2.4531:
+        // DoWorkAndStageResults gives (probably) correct acceleration for active burns
+        // AccelerationBody is not updated for atmospheric flight
+
+        //[HarmonyPatch(typeof(VehicleUpdateTask), "DoWorkAndStageResults"), HarmonyPostfix]
+        //public static void VehicleUpdateTask_DoWorkAndStageResults_Postfix(VehicleUpdateTask __instance)
+        //{
+        //    // Since this is a postfix the vehicle states have already been updated
+
+        //    List<VehicleUpdateState> vehicleStates = typeof(VehicleUpdateTask).GetField("_vehicleStates", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(__instance) as List<VehicleUpdateState>;
+        //    if (vehicleStates == null || vehicleStates.Count == 0) return;
+
+        //    double dt = __instance.SimStep.DeltaTime;
+        //    if (dt <= 0) return;
+        //    // Gets unreliable over 120x time warp
+        //    // It's assumed that at such high time warps no active maneuvers are happening
+        //    // Update paused vehicles need to be implemented to fix the high time warp issue
+
+        //    List<Vehicle> vehicles = vehicleStates.Select(vs => vs.ReadOnlyVehicle).ToList();
+        //    vehicles.Where(v => v.BubbleLeader == v).ToList().ForEach(v => vehicles.AddRange(v.NearbyVehicles));
+        //    vehicles = vehicles.Distinct().ToList();
+
+        //    foreach (Vehicle v in vehicles)
+        //    {
+        //        ReadOnlyPhysicsStates physicsState = v.GetPhysicsStates();
+        //        KinematicStates kinematic = physicsState.Kinematic;
+        //        double a = kinematic.PositionPhys.Length() * dt / StandardGravity;
+        //        double b = kinematic.VelocityPhys.Length() * dt / StandardGravity;
+        //    }
+
+        //    //vehicles.ForEach(v => UpdateLogicInstance(v.Id, dt, v.AccelerationBody / StandardGravity));
+        //    vehicles.ForEach(v => UpdateLogicInstance(v.Id, dt, v.GetPhysicsStates().Kinematic.VelocityPhys * dt / StandardGravity));
+        //}
+
         [HarmonyPatch(typeof(Vehicle), "OnKey"), HarmonyPrefix]
         public static bool Vehicle_OnKey_Prefix(Vehicle __instance)
         {
             KSAGEffectsLogicInstance logicInstance = GetLogicInstance(__instance.Id) ?? new KSAGEffectsLogicInstance(__instance.Id);
 
-            if (logicInstance.Enabled && logicInstance.ConsciousnessLevel < 0.05f)
-            {
-                return false;
-            }
-            return true;
+            return !logicInstance.Enabled || logicInstance.ConsciousnessLevel >= 0.05f;
         }
 
         public static double StandardGravity => KSA.Constants.STANDARD_GRAVITY;
@@ -94,14 +129,19 @@ namespace KSAGEffects
 
             if (GEffectBuffer.LookupSpan != null)
             {
-                float2 screenSize = new float2(Program.MainViewport.Size.X, Program.MainViewport.Size.Y);
+                float2 screenSize = new(Program.MainViewport.Size.X, Program.MainViewport.Size.Y);
 
                 Span<GEffectBuffer> data = GEffectBuffer.LookupSpan(KeyHash.Make("GEffectBuffer"));
                 data[0].ScreenSizeAdjustment = vignetteShape * screenSize.Y / screenSize.X;
             }
 
+            ImGui.SetNextWindowPos(
+                new float2(100.0f, 100.0f),
+                ImGuiCond.FirstUseEver
+            );
+
             // Create a debug window for showing g forces and calculated effect parameters
-            if (ImGui.Begin("G Effects debug window", ref showDebugWindow))
+            if (ImGui.Begin("G Effects debug window", ref showDebugWindow, ImGuiWindowFlags.NoSavedSettings))
             {
                 Dictionary<string, KSAGEffectsLogicInstance> instances = new(GEffectsInstances);
 
