@@ -176,7 +176,7 @@ jobs:
 
           content = re.sub(
               r'<ItemGroup>\s*<ProjectReference Include="\.\.\\\.\.\\GEffectsLogic\\GEffectsLogic\\GEffectsLogic\.csproj" />\s*</ItemGroup>',
-              '<ItemGroup>\n\t\t<Reference Include="GEffectsLogic">\n\t\t\t<HintPath>../deps/GEffectsLogic.dll</HintPath>\n\t\t\t<Private>False</Private>\n\t\t</Reference>\n\t</ItemGroup>',
+              '<ItemGroup>\n\t\t<Reference Include="GEffectsLogic">\n\t\t\t<HintPath>../deps/GEffectsLogic.dll</HintPath>\n\t\t\t<Private>True</Private>\n\t\t</Reference>\n\t</ItemGroup>',
               content,
               count=1,
               flags=re.S,
@@ -223,28 +223,28 @@ jobs:
           ksa_dir="$(pwd)/deps/ksa/"
           dotnet build KSAGEffects/KSAGEffects.csproj -c "$CONFIGURATION" --no-restore /p:KSADir="$ksa_dir" /p:OutputPath="../Release/KSAGEffects/"
 
-      - name: Create artifact zip
+      - name: Compute artifact name
+        id: artifact-name
         shell: bash
         run: |
-          rm -f KSAGEffects.zip
-          python3 - <<'PY'
-          import pathlib
-          import zipfile
+          version=$(grep -oPm1 '(?<=<VersionPrefix>)[^<]+' KSAGEffects/KSAGEffects.csproj)
+          short_hash="${GITHUB_SHA::7}"
 
-          source = pathlib.Path("Release/KSAGEffects")
-          target = pathlib.Path("KSAGEffects.zip")
+          if [ "$CONFIGURATION" = "Debug" ]; then
+            artifact_name="KSAGEffects-${version}-${short_hash}-debug"
+          elif [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$GITHUB_REF" = "refs/heads/main" ] && [ "${{ steps.versionprefix.outputs.changed }}" = "true" ]; then
+            artifact_name="KSAGEffects-${version}"
+          else
+            artifact_name="KSAGEffects-${version}-${short_hash}"
+          fi
 
-          with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
-              for file in source.rglob("*"):
-                  if file.is_file():
-                      archive.write(file, file.relative_to(source))
-          PY
+          echo "name=$artifact_name" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: KSAGEffects-${{ env.CONFIGURATION }}
-          path: KSAGEffects.zip
+          name: ${{ steps.artifact-name.outputs.name }}
+          path: Release/KSAGEffects/
 
       - name: Release pipeline placeholder
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.versionprefix.outputs.changed == 'true' }}
