@@ -74,8 +74,8 @@ jobs:
               with urllib.request.urlopen(req) as response:
                   target.write_bytes(response.read())
 
-          def latest_release(repo: str) -> dict:
-              return api_get(f"https://api.github.com/repos/{owner}/{repo}/releases/latest")
+          def latest_release(repo: str, repoPath: str) -> dict:
+              return api_get(f"https://api.github.com/repos/{repoPath}/{repo}/releases/latest")
 
           def find_asset(assets: list, predicate, error: str) -> dict:
               for asset in assets:
@@ -83,8 +83,8 @@ jobs:
                       return asset
               raise RuntimeError(error)
 
-          def download_zip_published_dll(repo: str, dll_name: str):
-              release = latest_release(repo)
+          def download_zip_published_dll(repo: str, repoPath: str, dll_name: str):
+              release = latest_release(repo, repoPath)
               assets = release.get("assets", [])
               zip_asset = find_asset(
                   assets,
@@ -107,8 +107,8 @@ jobs:
               target = deps_dir / dll_name
               target.write_bytes(dll_matches[0].read_bytes())
 
-          def download_direct_dll(repo: str, dll_name: str):
-              release = latest_release(repo)
+          def download_direct_dll(repo: str, repoPath: str, dll_name: str):
+              release = latest_release(repo, repoPath)
               assets = release.get("assets", [])
               dll_asset = find_asset(
                   assets,
@@ -117,9 +117,9 @@ jobs:
               )
               download(dll_asset["browser_download_url"], deps_dir / dll_name)
 
-          download_zip_published_dll("KittenExtensions", "KittenExtensions.dll")
-          download_zip_published_dll("ShaderExtensions", "ShaderExtensions.dll")
-          download_direct_dll("GEffectsLogic", "GEffectsLogic.dll")
+          download_zip_published_dll("KittenExtensions", "tsholmes", "KittenExtensions.dll")
+          download_zip_published_dll("ShaderExtensions", "AMPW-german", "ShaderExtensions.dll")
+          download_direct_dll("GEffectsLogic", "AMPW-german", "GEffectsLogic.dll")
           PY
 
       - name: Validate private KSA DLL repository setting
