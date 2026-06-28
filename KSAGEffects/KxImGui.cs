@@ -1,11 +1,4 @@
-﻿using Brutal;
-using Brutal.ImGuiApi;
-using Brutal.Numerics;
-using Brutal.VulkanApi.Abstractions;
-using KSA;
-using System;
-
-namespace KSAGEffects
+﻿namespace KSAGEffects
 {
     //internal static class KxImGui
     //{

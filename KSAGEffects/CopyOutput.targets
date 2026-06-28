@@ -4,9 +4,9 @@
         <PublishSourceDir>$(TargetDir)</PublishSourceDir>
     </PropertyGroup>
 
-    <ItemGroup Condition="'$(IsLocalBuild)' == 'true' and '$(OS)' == 'Windows_NT'">
-        <CopyDestination Include="$(SolutionDir)Release\$(ModName)\" />
-        <CopyDestination Include="C:\Users\AMPW\Documents\My Games\Kitten Space Agency\mods\$(ModName)\" />
+	<!--<ItemGroup Condition="'$(IsLocalBuild)' == 'true' and '$(OS)' == 'Windows_NT'">-->
+	<ItemGroup>
+		<CopyDestination Include="$(SolutionDir)Release\$(ModName)\" />
     </ItemGroup>
 
     <Target Name="CopyBuildOutput" AfterTargets="Build" Condition="'$(IsLocalBuild)' == 'true' and '$(OS)' == 'Windows_NT'">

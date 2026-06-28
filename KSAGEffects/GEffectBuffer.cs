@@ -1,8 +1,5 @@
 ﻿using Brutal.VulkanApi.Abstractions;
 using KSA;
-using KSAGEffects;
-using System;
-using System.Numerics;
 using System.Runtime.InteropServices;
 using ShaderExtensions;
 

@@ -1,13 +1,10 @@
 ﻿using GEffectsLogic;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace KSAGEffects
 {
     public class KSAGEffectsLogicInstance : GEffectsLogicInstance, IDisposable
     {
-        private static Dictionary<string, KSAGEffectsLogicInstance> namedInstances = new Dictionary<string, KSAGEffectsLogicInstance>();
+        private static Dictionary<string, KSAGEffectsLogicInstance> namedInstances = [];
         public static Dictionary<string, KSAGEffectsLogicInstance> NamedInstances => namedInstances;
 
         public static string GetInstanceName(int index) => NamedInstances.FirstOrDefault(kvp => kvp.Value.UniqueID == index).Value?.VehicleId ?? "Unknown";
