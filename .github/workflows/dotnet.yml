@@ -1,7 +1,7 @@
 name: KSAGEffects CI
 
 permissions:
-  contents: read
+  contents: write
 
 on:
   push:
@@ -12,6 +12,11 @@ on:
 jobs:
   build-package:
     runs-on: ubuntu-slim
+    outputs:
+      versionprefix_changed: ${{ steps.versionprefix.outputs.changed }}
+      version: ${{ steps.versionprefix.outputs.version }}
+      ksa_version: ${{ steps.ksa-version.outputs.version }}
+      artifact_name: ${{ steps.artifact-name.outputs.name }}
     env:
       CONFIGURATION: ${{ github.event_name == 'pull_request' && 'Debug' || 'Release' }}
       KSA_DLL_REPOSITORY: ${{ secrets.KSADLLRepo }}
@@ -56,7 +61,7 @@ jobs:
                   headers={
                       "Authorization": f"Bearer {token}",
                       "Accept": "application/vnd.github+json",
-                      "X-GitHub-Api-Version": "2022-11-28",
+                      "X-GitHub-Api-Version": "2026-03-10",
                   },
               )
               with urllib.request.urlopen(req) as response:
@@ -68,7 +73,7 @@ jobs:
                   headers={
                       "Authorization": f"Bearer {token}",
                       "Accept": "application/octet-stream",
-                      "X-GitHub-Api-Version": "2022-11-28",
+                      "X-GitHub-Api-Version": "2026-03-10",
                   },
               )
               with urllib.request.urlopen(req) as response:
@@ -157,12 +162,23 @@ jobs:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           git clone --depth 1 "https://x-access-token:${GITHUB_TOKEN}@github.com/${KSA_DLL_REPOSITORY}.git" deps/ksa-repo
-          find deps/ksa-repo -maxdepth 1 -type f -name '*.dll' -exec cp {} deps/ksa/ \;
+          find deps/ksa-repo -maxdepth 1 -type f -exec cp {} deps/ksa/ \;
           dll_count=$(find deps/ksa -maxdepth 1 -type f -name '*.dll' | wc -l)
           if [ "$dll_count" -eq 0 ]; then
             echo "No DLL files found in root of ${KSA_DLL_REPOSITORY}." >&2
             exit 1
           fi
+
+      - name: Collect KSA version
+        id: ksa-version
+        shell: bash
+        run: |
+          ksa_version_txt="deps/ksa/KSA_VERSION.txt"
+          if [ ! -f "$ksa_version_txt" ]; then
+            echo "KSA_VERSION.txt not found in deps/ksa. Cannot determine KSA version." >&2
+            exit 1
+          fi
+          echo "version=$(cat "$ksa_version_txt")" >> "$GITHUB_OUTPUT"
 
       - name: Switch project references to CI DLL hint paths
         shell: bash
@@ -199,6 +215,9 @@ jobs:
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         shell: bash
         run: |
+          version=v$(grep -oPm1 '(?<=<VersionPrefix>)[^<]+' KSAGEffects/KSAGEffects.csproj)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
           before="${{ github.event.before }}"
           if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
@@ -227,7 +246,7 @@ jobs:
         id: artifact-name
         shell: bash
         run: |
-          version=$(grep -oPm1 '(?<=<VersionPrefix>)[^<]+' KSAGEffects/KSAGEffects.csproj)
+          version="${{ steps.versionprefix.outputs.version }}"
           short_hash="${GITHUB_SHA::7}"
 
           if [ "$CONFIGURATION" = "Debug" ]; then
@@ -246,8 +265,120 @@ jobs:
           name: ${{ steps.artifact-name.outputs.name }}
           path: Release/KSAGEffects/
 
-      - name: Release pipeline placeholder
-        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.versionprefix.outputs.changed == 'true' }}
+  release:
+    runs-on: ubuntu-slim
+    needs: build-package
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.build-package.outputs.versionprefix_changed == 'true' }}
+    steps:
+      - name: Verify version change
         shell: bash
         run: |
-          echo "VersionPrefix changed on main. Placeholder release step executed."
+          new_version="${{ needs.build-package.outputs.version }}"
+          current_version=$(curl -s "https://api.github.com/repos/${{ github.repository }}/releases/latest" | grep -oP '"tag_name": "\K(.*)(?=")')
+
+          echo "csproj version: ${{ needs.build-package.outputs.version }}"
+          echo "latest release version: $current_version"
+
+          if [ "$new_version" = "$current_version" ]; then
+            echo "VersionPrefix has not changed since the last release. Skipping release."
+            exit 1
+          fi
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build-package.outputs.artifact_name }}
+          path: release-assets
+
+      - name: Zip release payload
+        shell: bash
+        run: |
+          artifact_name="${{ needs.build-package.outputs.artifact_name }}"
+          cd release-assets
+          zip -r "../${artifact_name}.zip" .
+
+      - name: Create GitHub release
+        id: github-release
+        shell: bash
+        run: |
+          json_payload=$(jq -n \
+            --arg tag_name "${{ needs.build-package.outputs.version }}" \
+            --arg name "${{ needs.build-package.outputs.version }}" \
+            --arg body "Built for KSA version ${{ needs.build-package.outputs.ksa_version }}" \
+            '{ tag_name: $tag_name, name: $name, body: $body, draft: false, prerelease: false, generate_release_notes: true }')
+
+          echo "Creating release with payload: $json_payload"
+          response_file=$(mktemp)
+          http_status=$(curl -sS -L -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            https://api.github.com/repos/${{ github.repository }}/releases \
+            -d "$json_payload" \
+            -o "$response_file" \
+            -w "%{http_code}")
+
+          if [ "$http_status" -ne 201 ]; then
+            echo "Failed to create release. Expected HTTP 201, got HTTP $http_status." >&2
+            cat "$response_file" >&2
+            exit 1
+          fi
+
+          upload_url=$(jq -r '.upload_url' "$response_file")
+          if [ -z "$upload_url" ] || [ "$upload_url" = "null" ]; then
+            echo "Release created but upload_url is missing in response." >&2
+            cat "$response_file" >&2
+            exit 1
+          fi
+
+          upload_url="${upload_url%{?name,label}}"
+          asset_name="${{ needs.build-package.outputs.artifact_name }}.zip"
+          asset_path="$asset_name"
+
+          if [ ! -f "$asset_path" ]; then
+            echo "Expected release asset file '$asset_path' was not found." >&2
+            exit 1
+          fi
+
+          echo "Uploading release asset: $asset_name"
+          upload_response_file=$(mktemp)
+          upload_status=$(curl -sS -L -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Content-Type: application/zip" \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            --data-binary @"$asset_path" \
+            "${upload_url}?name=${asset_name}" \
+            -o "$upload_response_file" \
+            -w "%{http_code}")
+
+          if [ "$upload_status" -ne 201 ]; then
+            echo "Failed to upload release asset. Expected HTTP 201, got HTTP $upload_status." >&2
+            cat "$upload_response_file" >&2
+            exit 1
+          fi
+
+          release_changelog=$(jq -r '.body // ""' "$response_file")
+          {
+            echo "changelog<<EOF"
+            echo "$release_changelog"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Release created and asset uploaded successfully."
+
+      - name: Create SpaceDock release
+        shell: bash
+        run: |
+          curl -F username="${{ vars.SPACEDOCKUSERNAME }}" \
+               -F password="${{ secrets.SPACEDOCKAUTH }}" \
+               -c ./cookies \
+               https://spacedock.info/api/login
+
+          curl -b ./cookies \
+               -F "version=${{ needs.build-package.outputs.version }}" \
+               -F "changelog=${{ steps.github-release.outputs.changelog }}" \
+               -F "game-version=${{ needs.build-package.outputs.ksa_version }}" \
+               -F "notify-followers=yes" \
+               -F "zipball=@${{ needs.build-package.outputs.artifact_name }}.zip" \
+               https://spacedock.info/api/mod/4363/update
