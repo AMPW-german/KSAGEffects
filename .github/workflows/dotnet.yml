@@ -124,7 +124,7 @@ jobs:
 
           download_zip_published_dll("KittenExtensions", "tsholmes", "KittenExtensions.dll")
           download_zip_published_dll("ShaderExtensions", "AMPW-german", "ShaderExtensions.dll")
-          download_direct_dll("GEffectsLogic", "AMPW-german", "GEffectsLogic.dll")
+          download_direct_dll("GEffectsLogic", "AMPW-german", "GEffectsLogic-net10.0.dll")
           PY
 
       - name: Validate private KSA DLL repository setting
@@ -192,7 +192,7 @@ jobs:
 
           content = re.sub(
               r'<ItemGroup>\s*<ProjectReference Include="\.\.\\\.\.\\GEffectsLogic\\GEffectsLogic\\GEffectsLogic\.csproj" />\s*</ItemGroup>',
-              '<ItemGroup>\n\t\t<Reference Include="GEffectsLogic">\n\t\t\t<HintPath>../deps/GEffectsLogic.dll</HintPath>\n\t\t\t<Private>True</Private>\n\t\t</Reference>\n\t</ItemGroup>',
+              '<ItemGroup>\n\t\t<Reference Include="GEffectsLogic">\n\t\t\t<HintPath>../deps/GEffectsLogic-net10.0.dll</HintPath>\n\t\t\t<Private>True</Private>\n\t\t</Reference>\n\t</ItemGroup>',
               content,
               count=1,
               flags=re.S,
