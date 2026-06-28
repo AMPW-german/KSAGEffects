@@ -331,7 +331,7 @@ jobs:
             exit 1
           fi
 
-          upload_url="${upload_url%{?name,label}}"
+          upload_url="${upload_url%\{*}"
           asset_name="${{ needs.build-package.outputs.artifact_name }}.zip"
           asset_path="$asset_name"
 
