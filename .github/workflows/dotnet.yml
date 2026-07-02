@@ -113,7 +113,7 @@ jobs:
               target = deps_dir / dll_name
               target.write_bytes(dll_matches[0].read_bytes())
 
-          def download_zip_published_dll_path(repo: str, repoPath: str, dll_name: str, dll_path: str):
+          def download_zip_published_dll_path(repo: str, repoPath: str, dll_name: str, dll_path: str, pdb: bool):
               release = latest_release(repo, repoPath)
               assets = release.get("assets", [])
               zip_asset = find_asset(
@@ -138,6 +138,14 @@ jobs:
               target = deps_dir / dll_name
               target.write_bytes(full_path.read_bytes())
 
+              if pdb:
+                  pdb_name = dll_name.replace(".dll", ".pdb")
+                  full_pdb_path = extract_path / dll_path / pdb_name
+                  if not full_pdb_path.exists():
+                      raise RuntimeError(f"{pdb_name} not found at {dll_path} in latest {repo} zip release asset.")
+                  target_pdb = deps_dir / pdb_name
+                  target_pdb.write_bytes(full_pdb_path.read_bytes())
+
           def download_direct_dll(repo: str, repoPath: str, dll_name: str):
               release = latest_release(repo, repoPath)
               assets = release.get("assets", [])
@@ -152,9 +160,9 @@ jobs:
           download_zip_published_dll("ShaderExtensions", "AMPW-german", "ShaderExtensions.dll")
 
           if os.environ.get("CONFIGURATION", "").lower() == "release":
-              download_zip_published_dll_path("GEffectsLogic", "AMPW-german", "GEffectsLogic-net10.0.dll", "net10.0/release")
+              download_zip_published_dll_path("GEffectsLogic", "AMPW-german", "GEffectsLogic-net10.0.dll", "net10.0/release", pdb=True)
           else:
-              download_zip_published_dll_path("GEffectsLogic", "AMPW-german", "GEffectsLogic-net10.0.dll", "net10.0/debug")
+              download_zip_published_dll_path("GEffectsLogic", "AMPW-german", "GEffectsLogic-net10.0.dll", "net10.0/debug", pdb=True)
           PY
 
       - name: Validate private KSA DLL repository setting
@@ -242,7 +250,6 @@ jobs:
 
       - name: Detect VersionPrefix change on main push
         id: versionprefix
-        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         shell: bash
         run: |
           version=v$(grep -oPm1 '(?<=<VersionPrefix>)[^<]+' KSAGEffects/KSAGEffects.csproj)
