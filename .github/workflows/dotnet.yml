@@ -17,6 +17,7 @@ jobs:
       version: ${{ steps.versionprefix.outputs.version }}
       ksa_version: ${{ steps.ksa-version.outputs.version }}
       artifact_name: ${{ steps.artifact-name.outputs.name }}
+      release_needed: ${{ steps.release-check.outputs.release_needed }}
     env:
       CONFIGURATION: ${{ github.event_name == 'pull_request' && 'Debug' || 'Release' }}
       KSA_DLL_REPOSITORY: ${{ secrets.KSADLLRepo }}
@@ -112,6 +113,39 @@ jobs:
               target = deps_dir / dll_name
               target.write_bytes(dll_matches[0].read_bytes())
 
+          def download_zip_published_dll_path(repo: str, repoPath: str, dll_name: str, dll_path: str, pdb: bool):
+              release = latest_release(repo, repoPath)
+              assets = release.get("assets", [])
+              zip_asset = find_asset(
+                  assets,
+                  lambda a: a["name"].lower().endswith(".zip"),
+                  f"No zip asset found in latest release for {repo}.",
+              )
+
+              zip_path = deps_dir / f"{repo}-latest.zip"
+              extract_path = extracted_dir / repo
+              extract_path.mkdir(parents=True, exist_ok=True)
+              download(zip_asset["browser_download_url"], zip_path)
+
+              with zipfile.ZipFile(zip_path, "r") as archive:
+                  archive.extractall(extract_path)
+
+              full_path = extract_path / dll_path / dll_name
+
+              if not full_path.exists():
+                  raise RuntimeError(f"{dll_name} not found at {dll_path} in latest {repo} zip release asset.")
+
+              target = deps_dir / dll_name
+              target.write_bytes(full_path.read_bytes())
+
+              if pdb:
+                  pdb_name = dll_name.replace(".dll", ".pdb")
+                  full_pdb_path = extract_path / dll_path / pdb_name
+                  if not full_pdb_path.exists():
+                      raise RuntimeError(f"{pdb_name} not found at {dll_path} in latest {repo} zip release asset.")
+                  target_pdb = deps_dir / pdb_name
+                  target_pdb.write_bytes(full_pdb_path.read_bytes())
+
           def download_direct_dll(repo: str, repoPath: str, dll_name: str):
               release = latest_release(repo, repoPath)
               assets = release.get("assets", [])
@@ -124,7 +158,11 @@ jobs:
 
           download_zip_published_dll("KittenExtensions", "tsholmes", "KittenExtensions.dll")
           download_zip_published_dll("ShaderExtensions", "AMPW-german", "ShaderExtensions.dll")
-          download_direct_dll("GEffectsLogic", "AMPW-german", "GEffectsLogic-net10.0.dll")
+
+          if os.environ.get("CONFIGURATION", "").lower() == "release":
+              download_zip_published_dll_path("GEffectsLogic", "AMPW-german", "GEffectsLogic-net10.0.dll", "net10.0/release", pdb=True)
+          else:
+              download_zip_published_dll_path("GEffectsLogic", "AMPW-german", "GEffectsLogic-net10.0.dll", "net10.0/debug", pdb=True)
           PY
 
       - name: Validate private KSA DLL repository setting
@@ -212,7 +250,6 @@ jobs:
 
       - name: Detect VersionPrefix change on main push
         id: versionprefix
-        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         shell: bash
         run: |
           version=v$(grep -oPm1 '(?<=<VersionPrefix>)[^<]+' KSAGEffects/KSAGEffects.csproj)
@@ -228,6 +265,32 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check if current version needs release
+        id: release-check
+        shell: bash
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != "push" ] || [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "release_needed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          new_version="${{ steps.versionprefix.outputs.version }}"
+          release_response=$(curl -sS -L \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/latest")
+
+          current_version=$(echo "$release_response" | jq -r '.tag_name // empty')
+
+          if [ -z "$current_version" ]; then
+            echo "release_needed=true" >> "$GITHUB_OUTPUT"
+          elif [ "$new_version" != "$current_version" ]; then
+            echo "release_needed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "release_needed=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Restore dependencies
@@ -268,22 +331,8 @@ jobs:
   release:
     runs-on: ubuntu-slim
     needs: build-package
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.build-package.outputs.versionprefix_changed == 'true' }}
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.build-package.outputs.release_needed == 'true' }}
     steps:
-      - name: Verify version change
-        shell: bash
-        run: |
-          new_version="${{ needs.build-package.outputs.version }}"
-          current_version=$(curl -s "https://api.github.com/repos/${{ github.repository }}/releases/latest" | grep -oP '"tag_name": "\K(.*)(?=")')
-
-          echo "csproj version: ${{ needs.build-package.outputs.version }}"
-          echo "latest release version: $current_version"
-
-          if [ "$new_version" = "$current_version" ]; then
-            echo "VersionPrefix has not changed since the last release. Skipping release."
-            exit 1
-          fi
-
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
