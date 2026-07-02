@@ -31,8 +31,8 @@
 		<Copyright>GNU GPL v3.0</Copyright>
 	</PropertyGroup>
 
-	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
-		<DebugType>none</DebugType>
+	<PropertyGroup>
+		<DebugType>portable</DebugType>
 	</PropertyGroup>
 
 	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='PerfDebug|AnyCPU'">
