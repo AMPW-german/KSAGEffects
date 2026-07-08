@@ -2,6 +2,7 @@
 using KSA;
 using System.Runtime.InteropServices;
 using ShaderExtensions;
+using Brutal.Numerics;
 
 namespace ShaderExtensions
 {
@@ -28,6 +29,8 @@ namespace KSAGEffects
         public float GrayScaleLevel;
         public float TunnelVisionLevel;
         public float ScreenSizeAdjustment;
+        public float filmGrainLevel;
+        public float4 filmGrainData;
 
         // lookup delegate fields must be static fields on the buffer element type
         // the names and specific types of these are not relevant, as long as the delegate signature matches

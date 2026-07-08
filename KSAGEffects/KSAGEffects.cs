@@ -1,5 +1,6 @@
 ﻿using Brutal.ImGuiApi;
 using Brutal.Numerics;
+using Core;
 using HarmonyLib;
 using KSA;
 using KSAGEffects.Logging;
@@ -168,15 +169,23 @@ namespace KSAGEffects
                         //float value = 1.0f - (activeVehicle.GetManualThrottle() - 0.01f) * 1.0101f;
                         Span<GEffectBuffer> data = GEffectBuffer.LookupSpan(KeyHash.Make("GEffectBuffer"));
 
+                        Renderer renderer = Program.GetRenderer();
+                        data[0].filmGrainData.X = renderer.Extent.Width;
+                        data[0].filmGrainData.Y = renderer.Extent.Height;
+                        data[0].filmGrainData.Z = 2.0f; // film grain scale
+                        data[0].filmGrainData.W += (float)dt;
+
                         if (instance.Enabled)
                         {
                             data[0].GrayScaleLevel = (float)instance.GreyScaleLevel;
                             data[0].TunnelVisionLevel = (float)instance.TunnelVisionLevel;
+                            data[0].filmGrainLevel = (float)instance.FilmGrainLevel;
                         }
                         else
                         {
                             data[0].GrayScaleLevel = 0f;
                             data[0].TunnelVisionLevel = 0f;
+                            data[0].filmGrainLevel = 0f;
                         }
                     }
                 }
