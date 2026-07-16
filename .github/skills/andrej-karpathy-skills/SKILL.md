@@ -1,5 +1,3 @@
-# Copilot Instructions
-
 ---
 name: karpathy-guidelines
 description: Behavioral guidelines to reduce common LLM coding mistakes. Use when writing, reviewing, or refactoring code to avoid overcomplication, make surgical changes, surface assumptions, and define verifiable success criteria.
@@ -67,7 +65,3 @@ For multi-step tasks, state a brief plan:
 ```
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
-
-
-## Project Guidelines
-- In PhysiologicalModel.Update, do not clamp/check dt and do not perform internal substeps; dt is safeguarded by LogicInstance.

@@ -1,7 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Assets>
+	<GlobalPostShader Id="GEffectsGaussianBlurShaderHorizontalPost" Path="Shaders/GaussianBlurHorizontal.frag" RenderPassId="254" RequiresUniqueRenderpass="true">
+		<GEffectsBlurPushConstantsBufferAsset Id="GEffectsGaussianBlurShaderHorizontalPostPushConstantsBuffer" />
+	</GlobalPostShader>
+	<GlobalPostShader Id="GEffectsGaussianBlurShaderVerticalPost" Path="Shaders/GaussianBlurVertical.frag" RenderPassId="255" RequiresUniqueRenderpass="true">
+		<GEffectsBlurPushConstantsBufferAsset Id="GEffectsGaussianBlurShaderVerticalPostPushConstantsBuffer" />
+	</GlobalPostShader>
+
 	<GlobalPostShader Id="GEffectFrag" Path="Shaders/GEffectShader.frag" RenderPassId="256" SubpassId="0">
 		<GEffectBuffer Id="GEffectBuffer" Size="1" />
 	</GlobalPostShader>
-    
 </Assets>

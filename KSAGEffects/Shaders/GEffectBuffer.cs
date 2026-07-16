@@ -1,26 +1,8 @@
-﻿using Brutal.VulkanApi.Abstractions;
-using KSA;
-using System.Runtime.InteropServices;
+﻿using Brutal.Numerics;
 using ShaderExtensions;
-using Brutal.Numerics;
+using System.Runtime.InteropServices;
 
-namespace ShaderExtensions
-{
-    [AttributeUsage(AttributeTargets.Struct)]
-    internal class SxUniformBufferAttribute(string xmlElement) : Attribute;
-
-
-    [AttributeUsage(AttributeTargets.Field)]
-    internal class SxUniformBufferLookupAttribute() : Attribute;
-
-    public delegate BufferEx SxBufferLookup(KeyHash hash);
-    public delegate MappedMemory SxMemoryLookup(KeyHash hash);
-    public delegate Span<T> SxSpanLookup<T>(KeyHash hash) where T : unmanaged;
-    public unsafe delegate T* SxPtrLookup<T>(KeyHash hash) where T : unmanaged;
-}
-
-
-namespace KSAGEffects
+namespace KSAGEffects.Shaders
 {
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     [SxUniformBuffer("GEffectBuffer")]
