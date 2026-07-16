@@ -17,7 +17,7 @@
 		<Configurations>Debug;Release;PerfDebug</Configurations>
 		<AllowUnsafeBlocks>True</AllowUnsafeBlocks>
 
-		<VersionPrefix>0.2.0</VersionPrefix>
+		<VersionPrefix>0.2.1</VersionPrefix>
 		<Version>$(VersionPrefix)</Version>
 		<AssemblyVersion>0.2.0.0</AssemblyVersion>
 		<FileVersion>$(VersionPrefix).0</FileVersion>
