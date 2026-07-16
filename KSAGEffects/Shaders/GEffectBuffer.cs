@@ -1,25 +1,8 @@
-﻿using Brutal.VulkanApi.Abstractions;
-using KSA;
-using System.Runtime.InteropServices;
+﻿using Brutal.Numerics;
 using ShaderExtensions;
+using System.Runtime.InteropServices;
 
-namespace ShaderExtensions
-{
-    [AttributeUsage(AttributeTargets.Struct)]
-    internal class SxUniformBufferAttribute(string xmlElement) : Attribute;
-
-
-    [AttributeUsage(AttributeTargets.Field)]
-    internal class SxUniformBufferLookupAttribute() : Attribute;
-
-    public delegate BufferEx SxBufferLookup(KeyHash hash);
-    public delegate MappedMemory SxMemoryLookup(KeyHash hash);
-    public delegate Span<T> SxSpanLookup<T>(KeyHash hash) where T : unmanaged;
-    public unsafe delegate T* SxPtrLookup<T>(KeyHash hash) where T : unmanaged;
-}
-
-
-namespace KSAGEffects
+namespace KSAGEffects.Shaders
 {
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     [SxUniformBuffer("GEffectBuffer")]
@@ -28,6 +11,8 @@ namespace KSAGEffects
         public float GrayScaleLevel;
         public float TunnelVisionLevel;
         public float ScreenSizeAdjustment;
+        public float filmGrainLevel;
+        public float4 filmGrainData;
 
         // lookup delegate fields must be static fields on the buffer element type
         // the names and specific types of these are not relevant, as long as the delegate signature matches

@@ -1,8 +1,10 @@
 ﻿using Brutal.ImGuiApi;
 using Brutal.Numerics;
+using Core;
 using HarmonyLib;
 using KSA;
 using KSAGEffects.Logging;
+using KSAGEffects.Shaders;
 using StarMap.API;
 using System.Reflection;
 
@@ -12,6 +14,11 @@ namespace KSAGEffects
     [HarmonyPatch]
     public class KSAGEffects
     {
+        public const int GaussianBlurMaxRadius = 20; // Max blurHorizontal radius in pixels
+        public static KeyHash GaussianBlurHorizontalHash = KeyHash.Make("GEffectsGaussianBlurShaderHorizontalPostPushConstantsBuffer");
+        public static KeyHash GaussianBlurVerticalHash = KeyHash.Make("GEffectsGaussianBlurShaderVerticalPostPushConstantsBuffer");
+        public static KeyHash GEffectBufferHash = KeyHash.Make("GEffectBuffer");
+
         // Vehicle IDs must be unique I think
         public static Dictionary<string, KSAGEffectsLogicInstance> GEffectsInstances => KSAGEffectsLogicInstance.NamedInstances;
         public static KSAGEffectsLogicInstance? GetLogicInstance(string vehicleId) => KSAGEffectsLogicInstance.NamedInstances.FirstOrDefault(kvp => kvp.Key == vehicleId).Value;
@@ -108,6 +115,35 @@ namespace KSAGEffects
         //    vehicles.ForEach(v => UpdateLogicInstance(v.Id, dt, v.GetPhysicsStates().Kinematic.VelocityPhys * dt / StandardGravity));
         //}
 
+        private static void CalculateGaussianWeights(double radius, Span<double> weights, out int shaderRadius)
+        {
+            weights.Clear();
+            radius = Math.Clamp(radius, 0.0, GaussianBlurMaxRadius);
+            shaderRadius = (int)Math.Ceiling(radius);
+
+            if (radius <= 0.0 || shaderRadius == 0)
+            {
+                weights[0] = 1.0;
+                return;
+            }
+
+            double sigma = radius / 3.0;
+            double twoSigmaSquared = 2.0 * sigma * sigma;
+            double total = 0.0;
+
+            for (int i = 0; i <= shaderRadius; i++)
+            {
+                double weight = Math.Exp(-(i * i) / twoSigmaSquared);
+                weights[i] = weight;
+                total += i == 0 ? weight : weight * 2.0;
+            }
+
+            for (int i = 0; i <= shaderRadius; i++)
+            {
+                weights[i] /= total;
+            }
+        }
+
         [HarmonyPatch(typeof(Vehicle), "OnKey"), HarmonyPrefix]
         public static bool Vehicle_OnKey_Prefix(Vehicle __instance)
         {
@@ -123,7 +159,7 @@ namespace KSAGEffects
 
         private bool showDebugWindow = true;
         [StarMapAfterGui]
-        public void AfterGui(double dt)
+        public unsafe void AfterGui(double dt)
         {
             if (!showDebugWindow) return;
 
@@ -159,43 +195,140 @@ namespace KSAGEffects
                     ImGui.Text($"Effect parameters for vehicle {activeVehicle.Id}:");
                     ImGui.Text($"Gz: {instance.LastGz:f4}");
                     ImGui.Text($"Consciousness level: {instance.ConsciousnessLevel:f4}");
-                    ImGui.Text($"Vision level: {instance.GreyScaleLevel:f4}");
+                    ImGui.Text($"Greyscale level: {instance.GreyScaleLevel:f4}");
+                    ImGui.Text($"Tunnel vision level: {instance.TunnelVisionLevel:f4}");
+                    ImGui.Text($"Film grain level: {instance.FilmGrainLevel:f4}");
+                    ImGui.Text($"Blur level: {instance.BlurLevel:f4}");
                     if (instance.Enabled && ImGui.Button("Disable")) instance.Enabled = false;
                     else if (!instance.Enabled && ImGui.Button("Enable")) instance.Enabled = true;
+                    if (ImGui.Button("Reset")) instance.Reset();
+
+                    if (GEffectsBlurPushConstantsBuffer.LookupSpan != null)
+                    {
+                        Span<GEffectsBlurPushConstantsBuffer> dataHorizontal = GEffectsBlurPushConstantsBuffer.LookupSpan(GaussianBlurHorizontalHash);
+                        ref GEffectsBlurPushConstantsBuffer blurHorizontal = ref dataHorizontal[0];
+                        Span<GEffectsBlurPushConstantsBuffer> dataVertical = GEffectsBlurPushConstantsBuffer.LookupSpan(GaussianBlurVerticalHash);
+                        ref GEffectsBlurPushConstantsBuffer blurVertical = ref dataVertical[0];
+
+                        Span<double> weights = stackalloc double[GaussianBlurMaxRadius + 1];
+
+                        if (instance.Enabled)
+                        {
+                            // Max blurHorizontal radius = 20 px
+                            float radius = GaussianBlurMaxRadius * (float)instance.BlurLevel;
+
+                            CalculateGaussianWeights(radius, weights, out int shaderRadius);
+                            blurHorizontal.Radius = shaderRadius;
+                            blurVertical.Radius = shaderRadius;
+
+                            fixed (float* destination = blurHorizontal.Weights)
+                            {
+                                for (int i = 0; i <= GaussianBlurMaxRadius; i++)
+                                {
+                                    destination[i] = (float)weights[i];
+                                }
+                            }
+                            fixed (float* destination = blurVertical.Weights)
+                            {
+                                for (int i = 0; i <= GaussianBlurMaxRadius; i++)
+                                {
+                                    destination[i] = (float)weights[i];
+                                }
+                            }
+                        }
+                        else
+                        {
+                            blurHorizontal.Radius = 0;
+                            blurVertical.Radius = 0;
+
+                            fixed (float* destination = blurHorizontal.Weights)
+                            {
+                                for (int i = 0; i <= GaussianBlurMaxRadius; i++)
+                                {
+                                    destination[i] = 0.0f;
+                                }
+                            }
+                            fixed (float* destination = blurVertical.Weights)
+                            {
+                                for (int i = 0; i <= GaussianBlurMaxRadius; i++)
+                                {
+                                    destination[i] = 0.0f;
+                                }
+                            }
+                        }
+
+                    }
 
                     if (GEffectBuffer.LookupSpan != null)
                     {
                         //float value = 1.0f - (activeVehicle.GetManualThrottle() - 0.01f) * 1.0101f;
-                        Span<GEffectBuffer> data = GEffectBuffer.LookupSpan(KeyHash.Make("GEffectBuffer"));
+                        Span<GEffectBuffer> data = GEffectBuffer.LookupSpan(GEffectBufferHash);
+
+                        Renderer renderer = Program.GetRenderer();
+                        data[0].filmGrainData.X = renderer.Extent.Width;
+                        data[0].filmGrainData.Y = renderer.Extent.Height;
+                        data[0].filmGrainData.Z = 2.0f; // film grain scale
+                        data[0].filmGrainData.W += (float)dt;
 
                         if (instance.Enabled)
                         {
                             data[0].GrayScaleLevel = (float)instance.GreyScaleLevel;
                             data[0].TunnelVisionLevel = (float)instance.TunnelVisionLevel;
+                            data[0].filmGrainLevel = (float)instance.FilmGrainLevel;
                         }
                         else
                         {
                             data[0].GrayScaleLevel = 0f;
                             data[0].TunnelVisionLevel = 0f;
+                            data[0].filmGrainLevel = 0f;
                         }
                     }
                 }
                 else
                 {
+                    if (GEffectsBlurPushConstantsBuffer.LookupSpan != null)
+                    {
+                        Span<GEffectsBlurPushConstantsBuffer> dataHorizontal = GEffectsBlurPushConstantsBuffer.LookupSpan(GaussianBlurHorizontalHash);
+                        ref GEffectsBlurPushConstantsBuffer blurHorizontal = ref dataHorizontal[0];
+                        Span<GEffectsBlurPushConstantsBuffer> dataVertical = GEffectsBlurPushConstantsBuffer.LookupSpan(GaussianBlurVerticalHash);
+                        ref GEffectsBlurPushConstantsBuffer blurVertical = ref dataVertical[0];
+                        blurHorizontal.Radius = 0;
+                        blurVertical.Radius = 0;
+                        fixed (float* destination = blurHorizontal.Weights)
+                        {
+                            for (int i = 0; i <= GaussianBlurMaxRadius; i++)
+                            {
+                                destination[i] = 0f;
+                            }
+                        }
+                        fixed (float* destination = blurVertical.Weights)
+                        {
+                            for (int i = 0; i <= GaussianBlurMaxRadius; i++)
+                            {
+                                destination[i] = 0f;
+                            }
+                        }
+                    }
+
                     if (GEffectBuffer.LookupSpan != null)
                     {
-                        Span<GEffectBuffer> data = GEffectBuffer.LookupSpan(KeyHash.Make("GEffectBuffer"));
+                        Span<GEffectBuffer> data = GEffectBuffer.LookupSpan(GEffectBufferHash);
                         data[0].GrayScaleLevel = 0f;
                         data[0].TunnelVisionLevel = 0f;
+                        data[0].filmGrainLevel = 0f;
                     }
                 }
 
-                ImGui.BeginTable("GEffectsInstancesTable", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.Resizable);
+                ImGui.BeginTable("GEffectsInstancesTable", 9, ImGuiTableFlags.Borders | ImGuiTableFlags.Resizable);
                 ImGui.TableSetupColumn("Vehicle ID", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 150f);
                 ImGui.TableSetupColumn("Gz", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
                 ImGui.TableSetupColumn("Consciousness", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
-                ImGui.TableSetupColumn("Vision", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
+                ImGui.TableSetupColumn("Greyscale", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
+                ImGui.TableSetupColumn("Tunnel Vision", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
+                ImGui.TableSetupColumn("Film Grain", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
+                ImGui.TableSetupColumn("Blur", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
                 ImGui.TableSetupColumn("Enabled", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
+                ImGui.TableSetupColumn("Reset", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
                 ImGui.TableHeadersRow();
 
                 foreach (KeyValuePair<string, KSAGEffectsLogicInstance> item in instances)
@@ -212,13 +345,29 @@ namespace KSAGEffects
                     ImGui.Text($"{item.Value.ConsciousnessLevel:f4}");
                     ImGui.PopID();
                     ImGui.TableNextColumn();
-                    ImGui.PushID($"{item.Key}_Vision");
+                    ImGui.PushID($"{item.Key}_Greyscale");
                     ImGui.Text($"{item.Value.GreyScaleLevel:f4}");
+                    ImGui.PopID();
+                    ImGui.TableNextColumn();
+                    ImGui.PushID($"{item.Key}_TunnelVision");
+                    ImGui.Text($"{item.Value.TunnelVisionLevel:f4}");
+                    ImGui.PopID();
+                    ImGui.TableNextColumn();
+                    ImGui.PushID($"{item.Key}_FilmGrain");
+                    ImGui.Text($"{item.Value.FilmGrainLevel:f4}");
+                    ImGui.PopID();
+                    ImGui.TableNextColumn();
+                    ImGui.PushID($"{item.Key}_Blur");
+                    ImGui.Text($"{item.Value.BlurLevel:f4}");
                     ImGui.PopID();
                     ImGui.TableNextColumn();
                     ImGui.PushID($"{item.Key}_Enabled");
                     if (item.Value.Enabled && ImGui.Button("Disable")) item.Value.Enabled = false;
                     else if (!item.Value.Enabled && ImGui.Button("Enable")) item.Value.Enabled = true;
+                    ImGui.PopID();
+                    ImGui.TableNextColumn();
+                    ImGui.PushID($"{item.Key}_Reset");
+                    if (ImGui.Button("Reset")) item.Value.Reset();
                     ImGui.PopID();
                 }
 
