@@ -17,7 +17,7 @@
 		<Configurations>Debug;Release;PerfDebug</Configurations>
 		<AllowUnsafeBlocks>True</AllowUnsafeBlocks>
 
-		<VersionPrefix>0.2.1</VersionPrefix>
+		<VersionPrefix>0.2.2</VersionPrefix>
 		<Version>$(VersionPrefix)</Version>
 		<AssemblyVersion>0.2.0.0</AssemblyVersion>
 		<FileVersion>$(VersionPrefix).0</FileVersion>
@@ -52,7 +52,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-	  <ProjectReference Include="..\..\GEffectsLogic\GEffectsLogic\GEffectsLogic.csproj" />
+		<ProjectReference Include="..\..\GEffectsLogic\GEffectsLogic\GEffectsLogic.csproj" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -80,17 +80,17 @@
 			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
 		</None>
 	</ItemGroup>
-	
+
 	<Target Name="SetVersionMetadata" BeforeTargets="GetAssemblyVersion">
 		<Exec Command="git rev-parse --short HEAD" ConsoleToMSBuild="true" IgnoreExitCode="true" IgnoreStandardErrorWarningFormat="true">
-		<Output TaskParameter="ConsoleOutput" PropertyName="GitShortHashRaw" />
+			<Output TaskParameter="ConsoleOutput" PropertyName="GitShortHashRaw" />
 		</Exec>
 
 		<PropertyGroup>
-		<GitShortHash Condition="'$(GitShortHashRaw)' != ''">$([System.String]::Copy('$(GitShortHashRaw)').Trim())</GitShortHash>
-		<GitShortHash Condition="'$(GitShortHash)' == ''">nogit</GitShortHash>
-		<InformationalVersion>v$(VersionPrefix).$(GitShortHash)$(InformationalVersionPostfix)</InformationalVersion>
-		<ProductVersion>$(InformationalVersion)</ProductVersion>
+			<GitShortHash Condition="'$(GitShortHashRaw)' != ''">$([System.String]::Copy('$(GitShortHashRaw)').Trim())</GitShortHash>
+			<GitShortHash Condition="'$(GitShortHash)' == ''">nogit</GitShortHash>
+			<InformationalVersion>v$(VersionPrefix).$(GitShortHash)$(InformationalVersionPostfix)</InformationalVersion>
+			<ProductVersion>$(InformationalVersion)</ProductVersion>
 		</PropertyGroup>
 	</Target>
 
