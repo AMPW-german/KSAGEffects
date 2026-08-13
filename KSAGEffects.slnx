@@ -4,6 +4,15 @@
     <BuildType Name="PerfDebug" />
     <BuildType Name="Release" />
   </Configurations>
+  <Folder Name="/SolutionDirectory/">
+  </Folder>
+  <Folder Name="/SolutionDirectory/.github/">
+    <File Path=".github/copilot-instructions.md" />
+    <File Path=".github/pull_request_template.md" />
+  </Folder>
+  <Folder Name="/SolutionDirectory/.github/workflows/">
+    <File Path=".github/workflows/dotnet.yml" />
+  </Folder>
   <Project Path="../GEffectsLogic/GEffectLogicTests/GEffectLogicTests.csproj" Id="7d5c05fb-2776-4ace-bdfa-3fc7b93cb7c6" />
   <Project Path="../GEffectsLogic/GEffectsLogic/GEffectsLogic.csproj" />
   <Project Path="../GEffectsLogic/GraphicLogicTest/GraphicLogicTest.csproj" Id="de3026f1-764c-43dd-a3ca-d720930c8041" />

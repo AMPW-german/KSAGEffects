@@ -1,22 +1,24 @@
 #version 450 core
 
-layout(location = 0) out vec4 outColor;
+layout(location = 0) out vec4 Out;
+layout(location = 0) in vec2 Uv;
+layout(set = 1, binding = 0) uniform sampler2D In;
 
-/* Post-process source texture
-   Must match:
-   set = 1, binding = 0
-*/
-layout(set = 1, binding = 0, input_attachment_index = 0) uniform subpassInput Source;
-layout(set = 1, binding = 1) uniform GEffectBuffer {
+layout(std140, set = 1, binding = 1) uniform ShaderTime {
+  uint FrameNumber;
+  float DeltaTime;
+  float RealTimeSinceStart;
+  float TimeSinceStart;
+  float TimeWarpSpeed;
+} Time;
+
+layout(set = 1, binding = 2) uniform GEffectBuffer {
   float grayScaleLevel;
   float tunnelVisionLevel;
   float screensizeAdjustment;
   float filmgrainStrength;
   vec4 filmgrainData; // width, height, grainSize, framenum
 };
-
-/* From ScreenspaceVert */
-layout(location = 0) in vec2 v_Uv;
 
 float luminance(vec3 c)
 {
@@ -315,15 +317,15 @@ float luma(vec4 color) {
 
 void main()
 {
-  vec4 c = subpassLoad(Source);
+  vec4 c = texture(In, Uv);
   float lum = luminance(c.rgb);
 
   vec3 greyColor = mix(c.rgb, vec3(lum), grayScaleLevel);
   vec3 vignetteColor = vec3(0.0); // black vignette
-  float vignetteStrength = cinematicVignette(v_Uv, tunnelVisionLevel, screensizeAdjustment);
+  float vignetteStrength = cinematicVignette(Uv, tunnelVisionLevel, screensizeAdjustment);
 
   float filmgrainStrengthWeighted = filmgrainStrength * 0.4 + vignetteStrength * 0.6;
-  vec3 g = vec3(grain(v_Uv, filmgrainData.xy / filmgrainData.z, filmgrainData.w));
+  vec3 g = vec3(grain(Uv, filmgrainData.xy / filmgrainData.z, filmgrainData.w));
 
   //blend the noise over the background, 
   //i.e. overlay, soft light, additive
@@ -337,5 +339,5 @@ void main()
 
   color = mix(color, vignetteColor, vignetteStrength);
 
-  outColor = vec4(color, 1);
+  Out = vec4(color, 1);
 }

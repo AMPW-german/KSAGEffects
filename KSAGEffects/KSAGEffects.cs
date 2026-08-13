@@ -59,12 +59,12 @@ namespace KSAGEffects
 
         // Vehicle.UpdateFromTaskResults updates the vehicle's state but is lacking the delta time
 
-        [HarmonyPatch(typeof(VehicleUpdateTask), "ApplyResultsToVehicles"), HarmonyPostfix]
-        public static void VehicleUpdateTask_ApplyResultsToVehicles_Postfix(VehicleUpdateTask __instance)
+        [HarmonyPatch(typeof(PhysicsBubble), "ApplyResultsToVehicles"), HarmonyPostfix]
+        public static void VehicleUpdateTask_ApplyResultsToVehicles_Postfix(PhysicsBubble __instance)
         {
             // Since this is a postfix the vehicle states have already been updated
 
-            List<VehicleUpdateState> vehicleStates = typeof(VehicleUpdateTask)?.GetField("_vehicleStates", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(__instance) as List<VehicleUpdateState> ?? [];
+            List<VehicleUpdateState> vehicleStates = typeof(PhysicsBubble)?.GetField("_vehicleStates", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(__instance) as List<VehicleUpdateState> ?? [];
             if (vehicleStates == null || vehicleStates.Count == 0) return;
 
             double dt = __instance.SimStep.DeltaTime;
@@ -203,6 +203,7 @@ namespace KSAGEffects
                     else if (!instance.Enabled && ImGui.Button("Enable")) instance.Enabled = true;
                     if (ImGui.Button("Reset")) instance.Reset();
 
+                    // Very Important TODO: Fix completly black screen when instance is disabled
                     if (GEffectsBlurPushConstantsBuffer.LookupSpan != null)
                     {
                         Span<GEffectsBlurPushConstantsBuffer> dataHorizontal = GEffectsBlurPushConstantsBuffer.LookupSpan(GaussianBlurHorizontalHash);
