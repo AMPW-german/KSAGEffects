@@ -12,11 +12,12 @@ layout(std140, set = 1, binding = 1) uniform ShaderTime {
   float TimeWarpSpeed;
 } Time;
 
-layout(set = 1, binding = 2) uniform GEffectBuffer {
+layout(push_constant, std430) uniform GEffectBuffer {
   float grayScaleLevel;
   float tunnelVisionLevel;
   float screensizeAdjustment;
   float filmgrainStrength;
+  vec4 tunnelVisionColor; // r, g, b, a
   vec4 filmgrainData; // width, height, grainSize, framenum
 };
 
@@ -321,7 +322,6 @@ void main()
   float lum = luminance(c.rgb);
 
   vec3 greyColor = mix(c.rgb, vec3(lum), grayScaleLevel);
-  vec3 vignetteColor = vec3(0.0); // black vignette
   float vignetteStrength = cinematicVignette(Uv, tunnelVisionLevel, screensizeAdjustment);
 
   float filmgrainStrengthWeighted = filmgrainStrength * 0.4 + vignetteStrength * 0.6;
@@ -337,7 +337,7 @@ void main()
   color = mix(color, greyColor, pow(response, 2.0));
   color = mix(greyColor, color, filmgrainStrengthWeighted);
 
-  color = mix(color, vignetteColor, vignetteStrength);
+  color = mix(color, tunnelVisionColor.rgb, vignetteStrength * tunnelVisionColor.a);
 
   Out = vec4(color, 1);
 }

@@ -19,6 +19,8 @@ namespace KSAGEffects
         public static KeyHash GaussianBlurVerticalHash = KeyHash.Make("GEffectsGaussianBlurShaderVerticalPostPushConstantsBuffer");
         public static KeyHash GEffectBufferHash = KeyHash.Make("GEffectBuffer");
 
+        public static bool negativeG = false;
+
         // Vehicle IDs must be unique I think
         public static Dictionary<string, KSAGEffectsLogicInstance> GEffectsInstances => KSAGEffectsLogicInstance.NamedInstances;
         public static KSAGEffectsLogicInstance? GetLogicInstance(string vehicleId) => KSAGEffectsLogicInstance.NamedInstances.FirstOrDefault(kvp => kvp.Key == vehicleId).Value;
@@ -28,6 +30,7 @@ namespace KSAGEffects
             // First version uses overall g force as Gz value
             // Gx and Gy are ignored for now
             double absoluteG = g.Length();
+            if (negativeG) absoluteG = -absoluteG;
             KSAGEffectsLogicInstance instance = GetLogicInstance(vehicleId) ?? new KSAGEffectsLogicInstance(vehicleId);
             instance.Update(deltaTime, 0, 0, absoluteG);
         }
@@ -202,6 +205,7 @@ namespace KSAGEffects
                     if (instance.Enabled && ImGui.Button("Disable")) instance.Enabled = false;
                     else if (!instance.Enabled && ImGui.Button("Enable")) instance.Enabled = true;
                     if (ImGui.Button("Reset")) instance.Reset();
+                    if (ImGui.Button($"Negative G: {negativeG}")) negativeG = !negativeG;
 
                     // Very Important TODO: Fix completly black screen when instance is disabled
                     if (GEffectsBlurPushConstantsBuffer.LookupSpan != null)
@@ -266,22 +270,24 @@ namespace KSAGEffects
                         Span<GEffectBuffer> data = GEffectBuffer.LookupSpan(GEffectBufferHash);
 
                         Renderer renderer = Program.GetRenderer();
-                        data[0].filmGrainData.X = renderer.Extent.Width;
-                        data[0].filmGrainData.Y = renderer.Extent.Height;
-                        data[0].filmGrainData.Z = 2.0f; // film grain scale
-                        data[0].filmGrainData.W += (float)dt;
+                        data[0].FilmGrainData.X = renderer.Extent.Width;
+                        data[0].FilmGrainData.Y = renderer.Extent.Height;
+                        data[0].FilmGrainData.Z = 2.0f; // film grain scale
+                        data[0].FilmGrainData.W += (float)dt;
 
                         if (instance.Enabled)
                         {
                             data[0].GrayScaleLevel = (float)instance.GreyScaleLevel;
                             data[0].TunnelVisionLevel = (float)instance.TunnelVisionLevel;
-                            data[0].filmGrainLevel = (float)instance.FilmGrainLevel;
+                            data[0].FilmGrainLevel = (float)instance.FilmGrainLevel;
+                            data[0].TunnelVisionColor = instance.PrimaryColor ? new float4(0.0f, 0.0f, 0.0f, 1.0f) : new float4(1.0f, 0.0f, 0.0f, 1.0f);
                         }
                         else
                         {
                             data[0].GrayScaleLevel = 0f;
                             data[0].TunnelVisionLevel = 0f;
-                            data[0].filmGrainLevel = 0f;
+                            data[0].FilmGrainLevel = 0f;
+                            data[0].TunnelVisionColor = new float4(0.0f, 0.0f, 0.0f, 1.0f);
                         }
                     }
                 }
@@ -316,7 +322,7 @@ namespace KSAGEffects
                         Span<GEffectBuffer> data = GEffectBuffer.LookupSpan(GEffectBufferHash);
                         data[0].GrayScaleLevel = 0f;
                         data[0].TunnelVisionLevel = 0f;
-                        data[0].filmGrainLevel = 0f;
+                        data[0].FilmGrainLevel = 0f;
                     }
                 }
 
