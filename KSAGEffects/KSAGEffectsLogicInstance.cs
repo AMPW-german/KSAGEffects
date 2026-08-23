@@ -1,11 +1,12 @@
 ﻿using GEffectsLogic;
+using System.Collections.Concurrent;
 
 namespace KSAGEffects
 {
     public class KSAGEffectsLogicInstance : GEffectsLogicInstance, IDisposable
     {
-        private static Dictionary<string, KSAGEffectsLogicInstance> namedInstances = [];
-        public static Dictionary<string, KSAGEffectsLogicInstance> NamedInstances => namedInstances;
+        private static ConcurrentDictionary<string, KSAGEffectsLogicInstance> namedInstances = new ConcurrentDictionary<string, KSAGEffectsLogicInstance>();
+        public static ConcurrentDictionary<string, KSAGEffectsLogicInstance> NamedInstances => namedInstances;
 
         public static string GetInstanceName(int index) => NamedInstances.FirstOrDefault(kvp => kvp.Value.UniqueID == index).Value?.VehicleId ?? "Unknown";
 
@@ -19,13 +20,13 @@ namespace KSAGEffects
 
         public void Dispose()
         {
-            namedInstances.Remove(VehicleId);
+            namedInstances.TryRemove(VehicleId, out _);
         }
 
         public KSAGEffectsLogicInstance(string vehicleId) : base()
         {
             VehicleId = vehicleId;
-            namedInstances.Add(vehicleId, this);
+            namedInstances.TryAdd(vehicleId, this);
         }
     }
 }
