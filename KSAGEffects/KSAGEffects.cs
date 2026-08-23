@@ -6,6 +6,7 @@ using KSA;
 using KSAGEffects.Logging;
 using KSAGEffects.Shaders;
 using StarMap.API;
+using System.Collections.Concurrent;
 using System.Reflection;
 
 namespace KSAGEffects
@@ -20,7 +21,7 @@ namespace KSAGEffects
         public static KeyHash GEffectBufferHash = KeyHash.Make("GEffectBuffer");
 
         // Vehicle IDs must be unique I think
-        public static Dictionary<string, KSAGEffectsLogicInstance> GEffectsInstances => KSAGEffectsLogicInstance.NamedInstances;
+        public static ConcurrentDictionary<string, KSAGEffectsLogicInstance> GEffectsInstances => KSAGEffectsLogicInstance.NamedInstances;
         public static KSAGEffectsLogicInstance? GetLogicInstance(string vehicleId) => KSAGEffectsLogicInstance.NamedInstances.FirstOrDefault(kvp => kvp.Key == vehicleId).Value;
 
         private static void UpdateLogicInstance(string vehicleId, double deltaTime, double3 g)
@@ -213,51 +214,27 @@ namespace KSAGEffects
 
                         Span<double> weights = stackalloc double[GaussianBlurMaxRadius + 1];
 
-                        if (instance.Enabled)
+                        // Max blurHorizontal radius = 20 px
+                        float radius = instance.Enabled ? GaussianBlurMaxRadius * (float)instance.BlurLevel : 0.0f;
+
+                        CalculateGaussianWeights(radius, weights, out int shaderRadius);
+                        blurHorizontal.Radius = shaderRadius;
+                        blurVertical.Radius = shaderRadius;
+
+                        fixed (float* destination = blurHorizontal.Weights)
                         {
-                            // Max blurHorizontal radius = 20 px
-                            float radius = GaussianBlurMaxRadius * (float)instance.BlurLevel;
-
-                            CalculateGaussianWeights(radius, weights, out int shaderRadius);
-                            blurHorizontal.Radius = shaderRadius;
-                            blurVertical.Radius = shaderRadius;
-
-                            fixed (float* destination = blurHorizontal.Weights)
+                            for (int i = 0; i <= GaussianBlurMaxRadius; i++)
                             {
-                                for (int i = 0; i <= GaussianBlurMaxRadius; i++)
-                                {
-                                    destination[i] = (float)weights[i];
-                                }
-                            }
-                            fixed (float* destination = blurVertical.Weights)
-                            {
-                                for (int i = 0; i <= GaussianBlurMaxRadius; i++)
-                                {
-                                    destination[i] = (float)weights[i];
-                                }
+                                destination[i] = (float)weights[i];
                             }
                         }
-                        else
+                        fixed (float* destination = blurVertical.Weights)
                         {
-                            blurHorizontal.Radius = 0;
-                            blurVertical.Radius = 0;
-
-                            fixed (float* destination = blurHorizontal.Weights)
+                            for (int i = 0; i <= GaussianBlurMaxRadius; i++)
                             {
-                                for (int i = 0; i <= GaussianBlurMaxRadius; i++)
-                                {
-                                    destination[i] = 0.0f;
-                                }
-                            }
-                            fixed (float* destination = blurVertical.Weights)
-                            {
-                                for (int i = 0; i <= GaussianBlurMaxRadius; i++)
-                                {
-                                    destination[i] = 0.0f;
-                                }
+                                destination[i] = (float)weights[i];
                             }
                         }
-
                     }
 
                     if (GEffectBuffer.LookupSpan != null)
@@ -293,20 +270,25 @@ namespace KSAGEffects
                         ref GEffectsBlurPushConstantsBuffer blurHorizontal = ref dataHorizontal[0];
                         Span<GEffectsBlurPushConstantsBuffer> dataVertical = GEffectsBlurPushConstantsBuffer.LookupSpan(GaussianBlurVerticalHash);
                         ref GEffectsBlurPushConstantsBuffer blurVertical = ref dataVertical[0];
-                        blurHorizontal.Radius = 0;
-                        blurVertical.Radius = 0;
+
+                        Span<double> weights = stackalloc double[GaussianBlurMaxRadius + 1];
+
+                        CalculateGaussianWeights(0.0, weights, out int shaderRadius);
+                        blurHorizontal.Radius = shaderRadius;
+                        blurVertical.Radius = shaderRadius;
+
                         fixed (float* destination = blurHorizontal.Weights)
                         {
                             for (int i = 0; i <= GaussianBlurMaxRadius; i++)
                             {
-                                destination[i] = 0f;
+                                destination[i] = (float)weights[i];
                             }
                         }
                         fixed (float* destination = blurVertical.Weights)
                         {
                             for (int i = 0; i <= GaussianBlurMaxRadius; i++)
                             {
-                                destination[i] = 0f;
+                                destination[i] = (float)weights[i];
                             }
                         }
                     }
