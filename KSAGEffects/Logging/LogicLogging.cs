@@ -1,4 +1,5 @@
-﻿using GEffectsLogic.Logging;
+﻿using GEffectsLogic;
+using GEffectsLogic.Logging;
 
 namespace KSAGEffects.Logging
 {
@@ -6,9 +7,10 @@ namespace KSAGEffects.Logging
     {
         public const string LogPrefix = "[GEffectsLogicInstance] ";
 
-        public override bool LogStr(string message, int id, LogLevel level = LogLevel.Debug)
+        public override bool LogStr(string message, GEffectsLogicInstance logicInstance, LogLevel level = LogLevel.Debug)
         {
-            string name = KSAGEffectsLogicInstance.GetInstanceName(id);
+            KSAGEffectsLogicInstance kSAGEffectsLogicInstance = logicInstance as KSAGEffectsLogicInstance ?? throw new InvalidOperationException("Invalid logic instance type");
+            string name = kSAGEffectsLogicInstance.VehicleId;
 
             switch (level)
             {

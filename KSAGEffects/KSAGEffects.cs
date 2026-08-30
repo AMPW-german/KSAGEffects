@@ -8,6 +8,7 @@ using KSAGEffects.Shaders;
 using StarMap.API;
 using System.Collections.Concurrent;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 
 namespace KSAGEffects
 {
@@ -23,16 +24,16 @@ namespace KSAGEffects
         public static bool negativeG = false;
 
         // Vehicle IDs must be unique I think
-        public static ConcurrentDictionary<string, KSAGEffectsLogicInstance> GEffectsInstances => KSAGEffectsLogicInstance.NamedInstances;
-        public static KSAGEffectsLogicInstance? GetLogicInstance(string vehicleId) => KSAGEffectsLogicInstance.NamedInstances.FirstOrDefault(kvp => kvp.Key == vehicleId).Value;
+        public static ConditionalWeakTable<Vehicle, KSAGEffectsLogicInstance> GEffectsInstances => KSAGEffectsLogicInstance.NamedInstances;
+        public static KSAGEffectsLogicInstance GetLogicInstance(Vehicle vehicle) => KSAGEffectsLogicInstance.NamedInstances.GetOrAdd(vehicle, v => new KSAGEffectsLogicInstance(v.Id));
 
-        private static void UpdateLogicInstance(string vehicleId, double deltaTime, double3 g)
+        private static void UpdateLogicInstance(Vehicle vehicle, double deltaTime, double3 g)
         {
             // First version uses overall g force as Gz value
             // Gx and Gy are ignored for now
             double absoluteG = g.Length();
             if (negativeG) absoluteG = -absoluteG;
-            KSAGEffectsLogicInstance instance = GetLogicInstance(vehicleId) ?? new KSAGEffectsLogicInstance(vehicleId);
+            KSAGEffectsLogicInstance instance = GetLogicInstance(vehicle);
             instance.Update(deltaTime, 0, 0, absoluteG);
         }
 
@@ -81,7 +82,7 @@ namespace KSAGEffects
             vehicles.Where(v => v.BubbleLeader == v).ToList().ForEach(v => vehicles.AddRange(v.NearbyVehicles));
             vehicles = vehicles.Distinct().ToList();
 
-            vehicles.ForEach(v => UpdateLogicInstance(v.Id, dt, v.AccelerationBody / StandardGravity));
+            vehicles.ForEach(v => UpdateLogicInstance(v, dt, v.AccelerationBody / StandardGravity));
         }
 
 
@@ -151,7 +152,7 @@ namespace KSAGEffects
         [HarmonyPatch(typeof(Vehicle), "OnKey"), HarmonyPrefix]
         public static bool Vehicle_OnKey_Prefix(Vehicle __instance)
         {
-            KSAGEffectsLogicInstance logicInstance = GetLogicInstance(__instance.Id) ?? new KSAGEffectsLogicInstance(__instance.Id);
+            KSAGEffectsLogicInstance logicInstance = GetLogicInstance(__instance);
 
             return !logicInstance.Enabled || logicInstance.ConsciousnessLevel >= 0.05f;
         }
@@ -180,16 +181,23 @@ namespace KSAGEffects
                 ImGuiCond.FirstUseEver
             );
 
+            // Patch Vehicle.dispose instead
+            // Remove GEffectsLogic internal dictionary. No internal instances should be kept, offload the entire lifecycle management to the user
+            foreach (var item in GEffectsInstances)
+            {
+                if (item.Key.IsDisposed) GEffectsInstances.Remove(item.Key);
+            }
+
             // Create a debug window for showing g forces and calculated effect parameters
             if (ImGui.Begin("G Effects debug window", ref showDebugWindow, ImGuiWindowFlags.NoSavedSettings))
             {
-                Dictionary<string, KSAGEffectsLogicInstance> instances = new(GEffectsInstances);
+                Dictionary<Vehicle, KSAGEffectsLogicInstance> instances = new(GEffectsInstances);
 
                 Vehicle? activeVehicle = Program.ControlledVehicle;
                 if (activeVehicle != null)
                 {
-                    instances.Remove(activeVehicle.Id);
-                    KSAGEffectsLogicInstance instance = GetLogicInstance(activeVehicle.Id) ?? new KSAGEffectsLogicInstance(activeVehicle.Id);
+                    instances.Remove(activeVehicle);
+                    KSAGEffectsLogicInstance instance = GetLogicInstance(activeVehicle);
 
                     //if (instance.ConsciousnessLevel < 0.01f)
                     //{
@@ -320,11 +328,11 @@ namespace KSAGEffects
                 ImGui.TableSetupColumn("Reset", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
                 ImGui.TableHeadersRow();
 
-                foreach (KeyValuePair<string, KSAGEffectsLogicInstance> item in instances)
+                foreach (KeyValuePair<Vehicle, KSAGEffectsLogicInstance> item in instances)
                 {
                     ImGui.TableNextRow();
                     ImGui.TableNextColumn();
-                    ImGui.Text(item.Key);
+                    ImGui.Text(item.Key.Id);
                     ImGui.TableNextColumn();
                     ImGui.PushID($"{item.Key}_Gz");
                     ImGui.Text($"{item.Value.LastGz:f4}");
