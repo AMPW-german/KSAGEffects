@@ -10,9 +10,15 @@ namespace KSAGEffects.Shaders
     {
         public float GrayScaleLevel;
         public float TunnelVisionLevel;
+        public float RedoutLevel;
         public float ScreenSizeAdjustment;
         public float FilmGrainLevel;
+        public float LoCLevel;
+        public float _padding0;
+        public float _padding1;
         public float4 TunnelVisionColor;
+        public float4 RedoutColor;
+        public float4 LoCColor;
         public float4 FilmGrainData;
 
         // lookup delegate fields must be static fields on the buffer element type

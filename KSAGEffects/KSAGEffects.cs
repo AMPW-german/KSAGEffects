@@ -174,6 +174,9 @@ namespace KSAGEffects
 
                 Span<GEffectBuffer> data = GEffectBuffer.LookupSpan(KeyHash.Make("GEffectBuffer"));
                 data[0].ScreenSizeAdjustment = vignetteShape * screenSize.Y / screenSize.X;
+                data[0].TunnelVisionColor = new float4(0.0f, 0.0f, 0.0f, 1.0f);
+                data[0].RedoutColor = new float4(1.0f, 0.0f, 0.0f, 1.0f);
+                data[0].LoCColor = new float4(0.0f, 0.0f, 0.0f, 1.0f);
             }
 
             ImGui.SetNextWindowPos(
@@ -207,10 +210,13 @@ namespace KSAGEffects
                     ImGui.Text($"Effect parameters for vehicle {activeVehicle.Id}:");
                     ImGui.Text($"Gz: {instance.LastGz:f4}");
                     ImGui.Text($"Consciousness level: {instance.ConsciousnessLevel:f4}");
-                    ImGui.Text($"Greyscale level: {instance.GreyScaleLevel:f4}");
-                    ImGui.Text($"Tunnel vision level: {instance.TunnelVisionLevel:f4}");
-                    ImGui.Text($"Film grain level: {instance.FilmGrainLevel:f4}");
-                    ImGui.Text($"Blur level: {instance.BlurLevel:f4}");
+                    ImGui.Text($"Grayscale level: {instance.VisualGrayscaleLevel:f4}");
+                    ImGui.Text($"Tunnel vision level: {instance.VisualTunnelVisionLevel:f4}");
+                    ImGui.Text($"Redout level: {instance.VisualRedoutLevel:f4}");
+                    ImGui.Text($"Film grain level: {instance.VisualFilmGrainLevel:f4}");
+                    ImGui.Text($"Blur level: {instance.VisualBlurLevel:f4}");
+                    ImGui.Text($"Consciousness level: {instance.VisualLoCLevel:f4}");
+
                     if (instance.Enabled && ImGui.Button("Disable")) instance.Enabled = false;
                     else if (!instance.Enabled && ImGui.Button("Enable")) instance.Enabled = true;
                     if (ImGui.Button("Reset")) instance.Reset();
@@ -227,7 +233,7 @@ namespace KSAGEffects
                         Span<double> weights = stackalloc double[GaussianBlurMaxRadius + 1];
 
                         // Max blurHorizontal radius = 20 px
-                        float radius = instance.Enabled ? GaussianBlurMaxRadius * (float)instance.BlurLevel : 0.0f;
+                        float radius = instance.Enabled ? GaussianBlurMaxRadius * (float)instance.VisualBlurLevel : 0.0f;
 
                         CalculateGaussianWeights(radius, weights, out int shaderRadius);
                         blurHorizontal.Radius = shaderRadius;
@@ -262,17 +268,19 @@ namespace KSAGEffects
 
                         if (instance.Enabled)
                         {
-                            data[0].GrayScaleLevel = (float)instance.GreyScaleLevel;
-                            data[0].TunnelVisionLevel = (float)instance.TunnelVisionLevel;
-                            data[0].FilmGrainLevel = (float)instance.FilmGrainLevel;
-                            data[0].TunnelVisionColor = instance.PrimaryColor ? new float4(0.0f, 0.0f, 0.0f, 1.0f) : new float4(1.0f, 0.0f, 0.0f, 1.0f);
+                            data[0].GrayScaleLevel = (float)instance.VisualGrayscaleLevel;
+                            data[0].TunnelVisionLevel = (float)instance.VisualTunnelVisionLevel;
+                            data[0].RedoutLevel = (float)instance.VisualRedoutLevel;
+                            data[0].FilmGrainLevel = (float)instance.VisualFilmGrainLevel;
+                            data[0].LoCLevel = (float)instance.VisualLoCLevel;
                         }
                         else
                         {
-                            data[0].GrayScaleLevel = 0f;
-                            data[0].TunnelVisionLevel = 0f;
-                            data[0].FilmGrainLevel = 0f;
-                            data[0].TunnelVisionColor = new float4(0.0f, 0.0f, 0.0f, 1.0f);
+                            data[0].GrayScaleLevel = 0.0f;
+                            data[0].TunnelVisionLevel = 0.0f;
+                            data[0].RedoutLevel = 0.0f;
+                            data[0].FilmGrainLevel = 0.0f;
+                            data[0].LoCLevel = 0.0f;
                         }
                     }
                 }
@@ -310,20 +318,24 @@ namespace KSAGEffects
                     if (GEffectBuffer.LookupSpan != null)
                     {
                         Span<GEffectBuffer> data = GEffectBuffer.LookupSpan(GEffectBufferHash);
-                        data[0].GrayScaleLevel = 0f;
-                        data[0].TunnelVisionLevel = 0f;
-                        data[0].FilmGrainLevel = 0f;
+                        data[0].GrayScaleLevel = 0.0f;
+                        data[0].TunnelVisionLevel = 0.0f;
+                        data[0].RedoutLevel = 0.0f;
+                        data[0].FilmGrainLevel = 0.0f;
+                        data[0].LoCLevel = 0.0f;
                     }
                 }
 
-                ImGui.BeginTable("GEffectsInstancesTable", 9, ImGuiTableFlags.Borders | ImGuiTableFlags.Resizable);
+                ImGui.BeginTable("GEffectsInstancesTable", 11, ImGuiTableFlags.Borders | ImGuiTableFlags.Resizable);
                 ImGui.TableSetupColumn("Vehicle ID", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 150f);
                 ImGui.TableSetupColumn("Gz", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
                 ImGui.TableSetupColumn("Consciousness", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
-                ImGui.TableSetupColumn("Greyscale", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
+                ImGui.TableSetupColumn("Grayscale", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
                 ImGui.TableSetupColumn("Tunnel Vision", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
+                ImGui.TableSetupColumn("Redout", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
                 ImGui.TableSetupColumn("Film Grain", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
                 ImGui.TableSetupColumn("Blur", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
+                ImGui.TableSetupColumn("Visual LoC", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
                 ImGui.TableSetupColumn("Enabled", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
                 ImGui.TableSetupColumn("Reset", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
                 ImGui.TableHeadersRow();
@@ -342,20 +354,28 @@ namespace KSAGEffects
                     ImGui.Text($"{item.Value.ConsciousnessLevel:f4}");
                     ImGui.PopID();
                     ImGui.TableNextColumn();
-                    ImGui.PushID($"{item.Key}_Greyscale");
-                    ImGui.Text($"{item.Value.GreyScaleLevel:f4}");
+                    ImGui.PushID($"{item.Key}_Grayscale");
+                    ImGui.Text($"{item.Value.VisualGrayscaleLevel:f4}");
                     ImGui.PopID();
                     ImGui.TableNextColumn();
                     ImGui.PushID($"{item.Key}_TunnelVision");
-                    ImGui.Text($"{item.Value.TunnelVisionLevel:f4}");
+                    ImGui.Text($"{item.Value.VisualTunnelVisionLevel:f4}");
+                    ImGui.PopID();
+                    ImGui.TableNextColumn();
+                    ImGui.PushID($"{item.Key}_Redout");
+                    ImGui.Text($"{item.Value.VisualRedoutLevel:f4}");
                     ImGui.PopID();
                     ImGui.TableNextColumn();
                     ImGui.PushID($"{item.Key}_FilmGrain");
-                    ImGui.Text($"{item.Value.FilmGrainLevel:f4}");
+                    ImGui.Text($"{item.Value.VisualFilmGrainLevel:f4}");
                     ImGui.PopID();
                     ImGui.TableNextColumn();
                     ImGui.PushID($"{item.Key}_Blur");
-                    ImGui.Text($"{item.Value.BlurLevel:f4}");
+                    ImGui.Text($"{item.Value.VisualBlurLevel:f4}");
+                    ImGui.PopID();
+                    ImGui.TableNextColumn();
+                    ImGui.PushID($"{item.Key}_VisualLoC");
+                    ImGui.Text($"{item.Value.VisualLoCLevel:f4}");
                     ImGui.PopID();
                     ImGui.TableNextColumn();
                     ImGui.PushID($"{item.Key}_Enabled");

@@ -15,9 +15,15 @@ layout(std140, set = 1, binding = 1) uniform ShaderTime {
 layout(push_constant, std430) uniform GEffectBuffer {
   float grayScaleLevel;
   float tunnelVisionLevel;
+  float redoutLevel;
   float screensizeAdjustment;
   float filmgrainStrength;
+  float loCLevel;
+  float _padding0; // padding to align to 16 bytes
+  float _padding1; // padding to align to 16 bytes
   vec4 tunnelVisionColor; // r, g, b, a
+  vec4 redoutColor; // r, g, b, a
+  vec4 loCColor; // r, g, b, a
   vec4 filmgrainData; // width, height, grainSize, framenum
 };
 
@@ -322,9 +328,10 @@ void main()
   float lum = luminance(c.rgb);
 
   vec3 greyColor = mix(c.rgb, vec3(lum), grayScaleLevel);
-  float vignetteStrength = cinematicVignette(Uv, tunnelVisionLevel, screensizeAdjustment);
+  float tunnelVisionStrength = cinematicVignette(Uv, tunnelVisionLevel, screensizeAdjustment);
+  float redoutStrength = cinematicVignette(Uv, redoutLevel, screensizeAdjustment);
 
-  float filmgrainStrengthWeighted = filmgrainStrength * 0.4 + vignetteStrength * 0.6;
+  float filmgrainStrengthWeighted = filmgrainStrength * 0.4 + tunnelVisionStrength * 0.6;
   vec3 g = vec3(grain(Uv, filmgrainData.xy / filmgrainData.z, filmgrainData.w));
 
   //blend the noise over the background, 
@@ -337,7 +344,11 @@ void main()
   color = mix(color, greyColor, pow(response, 2.0));
   color = mix(greyColor, color, filmgrainStrengthWeighted);
 
-  color = mix(color, tunnelVisionColor.rgb, vignetteStrength * tunnelVisionColor.a);
+  color = mix(color, redoutColor.rgb, redoutStrength * redoutColor.a);
+  color = mix(color, tunnelVisionColor.rgb, tunnelVisionStrength * tunnelVisionColor.a);
+  
+  // LoC overlay
+  color = mix(color, loCColor.rgb, loCLevel * loCColor.a);
 
   Out = vec4(color, 1);
 }
