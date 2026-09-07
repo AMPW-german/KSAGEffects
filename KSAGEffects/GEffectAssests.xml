@@ -8,6 +8,6 @@
 	</GlobalPostShader>
 
 	<GlobalPostShader Id="GEffectFrag" Path="Shaders/GEffectShader.frag" RenderPassId="256">
-		<GEffectBuffer Id="GEffectBuffer" Size="1" />
+		<GEffectBuffer Id="GEffectBuffer" />
 	</GlobalPostShader>
 </Assets>

@@ -1,5 +1,25 @@
 # Copilot Instructions
 
+## General Guidelines
+- If there are ambiguities, ASK. Don't assume, and don't hide confusion. Surface tradeoffs. If multiple interpretations exist, present them - don't pick silently. If a simpler approach exists, say so. Push back when warranted. If something is unclear, stop. Name what's confusing. Ask.
+- If changes break legacy compatibility and it's not explicitly stated how it should be handled, ASK. Don't assume.
+- Never use emojis, slang, or informal language in code comments or documentation. Use clear, professional language.
+- Never add yourself to the list of authors in code comments or documentation.
+- Think critically about the requested changes and determine if they are a good solution/change or if there's a better approach. If you think there is a better approach, explain and ASK. Don't assume.
+
+## Writing Plans
+- When writing a plan:
+  - Write the plan to a markdown file, not in a code comment or in the chat.
+  - Never use emojis, slang, or informal language.
+  - Write a checkmark list with narrowly defined steps.
+  - Use markdown checkboxes for each step. DO NOT ADD EMOJIS TO SHOW THEM AS DONE, e.g. "- [x] Step 1"
+  - Don't add a progress bar or percentage completion to the plan. Use the checkboxes to indicate completed steps.
+
+## Code Changes
+- Avoid duplicating existing code. If you think a new function or class is needed, check if it already exists. If it does, use it instead of creating a new one.
+- Custom agent profiles should avoid duplicating repository Copilot instructions, reference the instruction file instead, and explicitly treat those instructions as overriding the agent profile.
+
+
 ---
 name: karpathy-guidelines
 description: Behavioral guidelines to reduce common LLM coding mistakes. Use when writing, reviewing, or refactoring code to avoid overcomplication, make surgical changes, surface assumptions, and define verifiable success criteria.
