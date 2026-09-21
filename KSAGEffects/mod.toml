@@ -1,6 +1,0 @@
-﻿name = "KSAGEffects"
-
-assets = [ "GEffectAssests.xml" ]
-
-# patches = [ "Patches/LightspeedEngine.xml" ]
-patches = [ "Patches/EnhancedEngine.xml" ]

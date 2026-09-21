@@ -40,7 +40,7 @@ namespace KSAGEffects
         [StarMapImmediateLoad]
         public void Init(Mod definingMod)
         {
-            Console.WriteLine("Hello World from G Effects!");
+            Brutal.Logging.DefaultCategory.Log.Info("Hello World from G Effects!");
             var harmony = new Harmony("KSAGEffects");
             harmony.PatchAll();
             new LogicLogging();
