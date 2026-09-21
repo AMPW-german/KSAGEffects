@@ -231,14 +231,14 @@ jobs:
           project_path = pathlib.Path("KSAGEffects/KSAGEffects.csproj")
           content = project_path.read_text(encoding="utf-8")
 
-            content, replacement_count = re.subn(
-              r'\t\t<ProjectReference Include="\.\.\\\.\.\\GEffectsLogic\\GEffectsLogic\\GEffectsLogic\.csproj" />',
-              '\t\t<Reference Include="GEffectsLogic">\n\t\t\t<HintPath>../deps/GEffectsLogic-net10.0.dll</HintPath>\n\t\t\t<Private>True</Private>\n\t\t</Reference>',
-              content,
-              count=1,
-            )
-            if replacement_count != 1:
-              raise RuntimeError(f"Expected to replace one GEffectsLogic project reference, replaced {replacement_count}.")
+          content, replacement_count = re.subn(
+            r'\t\t<ProjectReference Include="\.\.\\\.\.\\GEffectsLogic\\GEffectsLogic\\GEffectsLogic\.csproj" />',
+            '\t\t<Reference Include="GEffectsLogic">\n\t\t\t<HintPath>../deps/GEffectsLogic-net10.0.dll</HintPath>\n\t\t\t<Private>True</Private>\n\t\t</Reference>',
+            content,
+            count=1,
+          )
+          if replacement_count != 1:
+            raise RuntimeError(f"Expected to replace one GEffectsLogic project reference, replaced {replacement_count}.")
 
           project_path.write_text(content, encoding="utf-8")
           PY
