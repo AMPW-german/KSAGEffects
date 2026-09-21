@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-	<Import Project="KSAGEffects.props" />
+	<Import Project="KSADLLs.props" />
 	<PropertyGroup>
+		<ModName>KSAGEffects</ModName>
 		<Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
 		<Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
 		<TargetFramework>net10.0</TargetFramework>
@@ -17,7 +18,7 @@
 		<Configurations>Debug;Release;PerfDebug</Configurations>
 		<AllowUnsafeBlocks>True</AllowUnsafeBlocks>
 
-		<VersionPrefix>0.3.1</VersionPrefix>
+		<VersionPrefix>0.3.2</VersionPrefix>
 		<Version>$(VersionPrefix)</Version>
 		<AssemblyVersion>0.3.0.0</AssemblyVersion>
 		<FileVersion>$(VersionPrefix).0</FileVersion>
@@ -33,35 +34,38 @@
 
 	<PropertyGroup>
 		<DebugType>portable</DebugType>
-	</PropertyGroup>
-
-	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='PerfDebug|AnyCPU'">
-		<DefineConstants>$(DefineConstants);DEBUG</DefineConstants>
+		<DebugSymbols>true</DebugSymbols>
+		<Optimize>false</Optimize>
+		<DefineConstants>TRACE</DefineConstants>
+		<ErrorReport>prompt</ErrorReport>
+		<WarningLevel>4</WarningLevel>
+		<Prefer32Bit>false</Prefer32Bit>
 	</PropertyGroup>
 
 	<PropertyGroup Condition="'$(Configuration)'=='Debug'">
+		<DefineConstants>$(DefineConstants);DEBUG</DefineConstants>
 		<InformationalVersionPostfix>-debug</InformationalVersionPostfix>
 	</PropertyGroup>
 
 	<PropertyGroup Condition="'$(Configuration)'=='PerfDebug'">
+		<DefineConstants>$(DefineConstants);DEBUG</DefineConstants>
 		<InformationalVersionPostfix>-perfDebug</InformationalVersionPostfix>
 	</PropertyGroup>
 
 	<ItemGroup>
-		<PackageReference Include="StarMap.API" Version="0.3.4" />
-	</ItemGroup>
-
-	<ItemGroup>
+		<PackageReference Include="Lib.Harmony" Version="2.4.2" />
 		<ProjectReference Include="..\..\GEffectsLogic\GEffectsLogic\GEffectsLogic.csproj" />
-	</ItemGroup>
 
-	<ItemGroup>
+		<Reference Include="StarMap.API">
+			<HintPath>$(KSAModsDir)StarMap/StarMap.API.dll</HintPath>
+			<Private>False</Private>
+		</Reference>
 		<Reference Include="KittenExtensions">
-			<HintPath>..\..\..\..\Documents\My Games\Kitten Space Agency\mods\KittenExtensions\KittenExtensions.dll</HintPath>
+			<HintPath>$(KSAModsDir)KittenExtensions/KittenExtensions.dll</HintPath>
 			<Private>False</Private>
 		</Reference>
 		<Reference Include="ShaderExtensions">
-			<HintPath>..\..\..\..\Documents\My Games\Kitten Space Agency\mods\ShaderExtensions\ShaderExtensions.dll</HintPath>
+			<HintPath>$(KSAModsDir)ShaderExtensions/ShaderExtensions.dll</HintPath>
 			<Private>False</Private>
 		</Reference>
 	</ItemGroup>
@@ -74,9 +78,6 @@
 			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
 		</None>
 		<None Update="Patches\**\*.*">
-			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
-		</None>
-		<None Update="mod.toml">
 			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
 		</None>
 	</ItemGroup>
