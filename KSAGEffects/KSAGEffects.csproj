@@ -61,7 +61,7 @@
 			<Private>False</Private>
 		</Reference>
 		<Reference Include="KittenExtensions">
-			<HintPath>$(KSAModsDir)KittenExtensions/KittenExtensions.dll</HintPath>
+			<HintPath>$(KSAModsDir)KittenExtensionsContinued/KittenExtensions.dll</HintPath>
 			<Private>False</Private>
 		</Reference>
 		<Reference Include="ShaderExtensions">
@@ -71,14 +71,27 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<StarMapModDependency Include="KittenExtensionsContinued">
+			<ImportedAssemblies>KittenExtensions</ImportedAssemblies>
+		</StarMapModDependency>
+		<StarMapModDependency Include="ShaderExtensions">
+			<ImportedAssemblies>ShaderExtensions</ImportedAssemblies>
+		</StarMapModDependency>
+	</ItemGroup>
+
+	<ItemGroup>
 		<None Update="GEffectAssests.xml">
 			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
+			<ModManifestArray>assets</ModManifestArray>
 		</None>
 		<None Update="Shaders\**\*.*">
 			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
 		</None>
 		<None Update="Patches\**\*.*">
 			<CopyToOutputDirectory>Always</CopyToOutputDirectory>
+		</None>
+		<None Update="Patches\EnhancedEngine.xml">
+			<ModManifestArray>patches</ModManifestArray>
 		</None>
 	</ItemGroup>
 
