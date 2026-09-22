@@ -159,7 +159,7 @@ jobs:
               download(dll_asset["browser_download_url"], deps_dir / modName / dllName)
 
           download_zip_published_dll("StarMap", "StarMapLoader", "StarMap.API.dll", "StarMap")
-          download_zip_published_dll("KittenExtensions", "tsholmes", "KittenExtensions.dll", "KittenExtensions")
+          download_zip_published_dll("KittenExtensions", "AMPW-german", "KittenExtensions.dll", "KittenExtensionsContinued")
           download_zip_published_dll("ShaderExtensions", "AMPW-german", "ShaderExtensions.dll", "ShaderExtensions")
 
           if os.environ.get("CONFIGURATION", "").lower() == "release":
