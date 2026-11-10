@@ -8,11 +8,52 @@ namespace KSAGEffects
 {
     public class KSAGEffectsLogicInstance : GEffectsLogicInstance, IDisposable
     {
-        private static readonly ConditionalWeakTable<Vehicle, KSAGEffectsLogicInstance> namedInstances = new();
-        public static ConditionalWeakTable<Vehicle, KSAGEffectsLogicInstance> NamedInstances => namedInstances;
+        private static readonly ConditionalWeakTable<string, KSAGEffectsLogicInstance> namedInstances = new();
+        public static ConditionalWeakTable<string, KSAGEffectsLogicInstance> NamedInstances => namedInstances;
 
-        public string VehicleId { get; private set; }
-        public bool Enabled { get; set; } = true;
+        public string KittenId { get; private set; }
+        private volatile bool enabled = true;
+        public bool Enabled
+        {
+            get => enabled;
+            set => enabled = value;
+        }
+
+        private double _pendingDt;
+        private double _pendingGxDt;
+        private double _pendingGyDt;
+        private double _pendingGzDt;
+
+        internal void AddPendingInput(double dt, double gx, double gy, double gz)
+        {
+            _pendingDt += dt;
+            _pendingGxDt += gx * dt;
+            _pendingGyDt += gy * dt;
+            _pendingGzDt += gz * dt;
+        }
+
+        internal bool TryTakePending(out double dt, out double gx, out double gy, out double gz)
+        {
+            if (_pendingDt <= 0 || !Enabled)
+            {
+                _pendingDt = 0;
+                _pendingGxDt = 0;
+                _pendingGyDt = 0;
+                _pendingGzDt = 0;
+                dt = gx = gy = gz = 0;
+                return false;
+            }
+
+            dt = _pendingDt;
+            gx = _pendingGxDt / dt;
+            gy = _pendingGyDt / dt;
+            gz = _pendingGzDt / dt;
+            _pendingDt = 0;
+            _pendingGxDt = 0;
+            _pendingGyDt = 0;
+            _pendingGzDt = 0;
+            return true;
+        }
 
         public override void Update(double deltaTime, double currentGx, double currentGy, double currentGz)
         {
@@ -21,12 +62,12 @@ namespace KSAGEffects
 
         public void Dispose()
         {
-            LogicLogging.Log($"Disposing KSAGEffectsLogicInstance for vehicle {VehicleId}", this, GEffectsLogic.Logging.Logger.LogLevel.Info);
+            LogicLogging.Log($"Disposing KSAGEffectsLogicInstance for {KittenId}", this, GEffectsLogic.Logging.Logger.LogLevel.Info);
         }
 
-        public KSAGEffectsLogicInstance(string vehicleId) : base()
+        public KSAGEffectsLogicInstance(string kittenId) : base()
         {
-            VehicleId = vehicleId;
+            KittenId = kittenId;
         }
     }
 }

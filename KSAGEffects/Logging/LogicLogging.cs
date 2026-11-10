@@ -10,7 +10,7 @@ namespace KSAGEffects.Logging
         public override bool LogStr(string message, GEffectsLogicInstance logicInstance, LogLevel level = LogLevel.Debug)
         {
             KSAGEffectsLogicInstance kSAGEffectsLogicInstance = logicInstance as KSAGEffectsLogicInstance ?? throw new InvalidOperationException("Invalid logic instance type");
-            string name = kSAGEffectsLogicInstance.VehicleId;
+            string name = kSAGEffectsLogicInstance.KittenId;
 
             switch (level)
             {

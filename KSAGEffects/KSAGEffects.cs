@@ -7,7 +7,6 @@ using KSAGEffects.Logging;
 using KSAGEffects.Shaders;
 using StarMap.API;
 using System.Collections.Concurrent;
-using System.Reflection;
 using System.Runtime.CompilerServices;
 
 namespace KSAGEffects
@@ -24,17 +23,25 @@ namespace KSAGEffects
         public static bool negativeG = false;
 
         // Vehicle IDs must be unique I think
-        public static ConditionalWeakTable<Vehicle, KSAGEffectsLogicInstance> GEffectsInstances => KSAGEffectsLogicInstance.NamedInstances;
-        public static KSAGEffectsLogicInstance GetLogicInstance(Vehicle vehicle) => KSAGEffectsLogicInstance.NamedInstances.GetOrAdd(vehicle, v => new KSAGEffectsLogicInstance(v.Id));
-
-        private static void UpdateLogicInstance(Vehicle vehicle, double deltaTime, double3 g)
+        public static ConditionalWeakTable<string, KSAGEffectsLogicInstance> GEffectsInstances => KSAGEffectsLogicInstance.NamedInstances;
+        public static KSAGEffectsLogicInstance GetLogicInstance(string kittenId) => KSAGEffectsLogicInstance.NamedInstances.GetOrAdd(kittenId, v => new KSAGEffectsLogicInstance(kittenId));
+        public static List<KSAGEffectsLogicInstance> GetVehicleInstances(Vehicle vehicle)
         {
-            // First version uses overall g force as Gz value
-            // Gx and Gy are ignored for now
-            double absoluteG = g.Length();
-            if (negativeG) absoluteG = -absoluteG;
-            KSAGEffectsLogicInstance instance = GetLogicInstance(vehicle);
-            instance.Update(deltaTime, 0, 0, absoluteG);
+            ReadOnlySpan<IVASeat> crewSeats = vehicle.Crew;
+            List<KSAGEffectsLogicInstance> instances = new();
+            for (int i = 0; i < vehicle.Crew.Length; i++)
+            {
+                IVASeat iVASeat = vehicle.Crew[i];
+                if (!(iVASeat.AssignedKittenHash == KeyHash.Zero))
+                {
+                    KittenRosterEntryData? kittenRosterEntryData = Universe.KittenRoster.Find(iVASeat.AssignedKittenHash);
+                    if (kittenRosterEntryData != null)
+                    {
+                        instances.Add(GetLogicInstance(kittenRosterEntryData.Name));
+                    }
+                }
+            }
+            return instances;
         }
 
         [StarMapImmediateLoad]
@@ -64,25 +71,110 @@ namespace KSAGEffects
 
         // Vehicle.UpdateFromTaskResults updates the vehicle's state but is lacking the delta time
 
-        [HarmonyPatch(typeof(PhysicsBubble), "ApplyResultsToVehicles"), HarmonyPostfix]
-        public static void VehicleUpdateTask_ApplyResultsToVehicles_Postfix(PhysicsBubble __instance)
+        private static readonly AccessTools.FieldRef<PhysicsBubble, List<VehicleUpdateState>> VehicleStatesRef =
+            AccessTools.FieldRefAccess<PhysicsBubble, List<VehicleUpdateState>>("_vehicleStates");
+        private static readonly List<KSAGEffectsLogicInstance> _touchedInstances = new(capacity: 64);
+#if DEBUG
+        private static int _virtualInstanceCount;
+        private static string? _virtualSyncedId;
+        private static int _virtualSyncedCount = -1;
+        private static readonly List<string> _virtualKeyPool = new();
+        private static readonly HashSet<string> _virtualInstanceKeys = new();
+
+        private static void SyncVirtualInstances()
         {
-            // Since this is a postfix the vehicle states have already been updated
+            string? id = Program.ControlledVehicle?.Id;
+            if (id == _virtualSyncedId && _virtualInstanceCount == _virtualSyncedCount) return;
+            if (id != _virtualSyncedId) _virtualKeyPool.Clear();
+            _virtualSyncedId = id;
+            _virtualSyncedCount = _virtualInstanceCount;
+            _virtualInstanceKeys.Clear();
+            if (id == null) return;
+            while (_virtualKeyPool.Count < _virtualInstanceCount)
+                _virtualKeyPool.Add($"{id}_gInstance_{_virtualKeyPool.Count}");
+            for (int i = 0; i < _virtualInstanceCount; i++)
+                _virtualInstanceKeys.Add(_virtualKeyPool[i]);
+        }
+#endif
 
-            List<VehicleUpdateState> vehicleStates = typeof(PhysicsBubble)?.GetField("_vehicleStates", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(__instance) as List<VehicleUpdateState> ?? [];
-            if (vehicleStates == null || vehicleStates.Count == 0) return;
+        [HarmonyPatch(typeof(VehicleUpdateTask), "ApplyResultsToMainThread"), HarmonyPostfix]
+        public static void VehicleUpdateTask_ApplyResultsToMainThread_Postfix(VehicleUpdateTask __instance)
+        {
+            ReadOnlySpan<PhysicsBubble> bubbles = __instance.SyncWindowBubbles;
+            _touchedInstances.Clear();
+#if DEBUG
+            SyncVirtualInstances();
+#endif
 
-            double dt = __instance.SimStep.DeltaTime;
-            if (dt <= 0) return;
-            // Gets unreliable over 120x time warp
-            // It's assumed that at such high time warps no active maneuvers are happening
-            // Update paused vehicles need to be implemented to fix the high time warp issue
+            foreach (PhysicsBubble bubble in bubbles)
+            {
+                if (!bubble.IsResultsReady) continue;
+                double dt = bubble.SimStep.DeltaTime;
+                if (dt <= 0) continue;
 
-            List<Vehicle> vehicles = vehicleStates.Select(vs => vs.ReadOnlyVehicle).ToList();
-            vehicles.Where(v => v.BubbleLeader == v).ToList().ForEach(v => vehicles.AddRange(v.NearbyVehicles));
-            vehicles = vehicles.Distinct().ToList();
+                foreach (VehicleUpdateState vehicleState in VehicleStatesRef(bubble))
+                {
+                    Vehicle vehicle = vehicleState.ReadOnlyVehicle;
+                    if (vehicle == null) continue;
 
-            vehicles.ForEach(v => UpdateLogicInstance(v, dt, v.AccelerationBody / StandardGravity));
+                    double3 g = vehicle.AccelerationBody / StandardGravity;
+
+                    if (vehicle is KittenEva)
+                    {
+                        KSAGEffectsLogicInstance instance = GetLogicInstance(vehicle.Id);
+                        instance.AddPendingInput(dt, g.X, g.Y, g.Z);
+                        _touchedInstances.Add(instance);
+                    }
+                    else for (int i = 0; i < vehicle.Crew.Length; i++)
+                    {
+                        IVASeat iVASeat = vehicle.Crew[i];
+                        if (!(iVASeat.AssignedKittenHash == KeyHash.Zero))
+                        {
+                            KittenRosterEntryData? kittenRosterEntryData = Universe.KittenRoster.Find(iVASeat.AssignedKittenHash);
+                            if (kittenRosterEntryData != null)
+                            {
+                                // Seat axes are authored in the part's assembly frame.
+                                // Transform directions into the vehicle/body frame.
+                                double3 forward = double3.Normalize(
+                                    iVASeat.ForwardAxisAsmb.Transform(iVASeat.Parent.Asmb2VehicleAsmb));
+
+                                double3 up = double3.Normalize(
+                                    iVASeat.UpAxisAsmb.Transform(iVASeat.Parent.Asmb2VehicleAsmb));
+
+                                // Match KSA's seat-axis construction.
+                                double3 right = double3.Normalize(double3.Cross(-up, forward));
+                                up = -double3.Cross(forward, right);
+
+                                double gx = double3.Dot(g, forward);
+                                double gy = double3.Dot(g, right);
+                                double gz = double3.Dot(g, -up); // feetward is opposite seat-up
+                                KSAGEffectsLogicInstance instance = GetLogicInstance(kittenRosterEntryData.Name);
+                                instance.AddPendingInput(dt, gx, gy, gz);
+                                _touchedInstances.Add(instance);
+                            }
+                        }
+                    }
+#if DEBUG
+                    if (_virtualInstanceCount > 0 && vehicle.Id == _virtualSyncedId)
+                    {
+                        for (int i = 0; i < _virtualInstanceCount; i++)
+                        {
+                            KSAGEffectsLogicInstance instance = GetLogicInstance(_virtualKeyPool[i]);
+                            instance.AddPendingInput(dt, g.X, g.Y, g.Z);
+                            _touchedInstances.Add(instance);
+                        }
+                    }
+#endif
+                }
+            }
+
+            GEffectsScheduler.Dispatch(_touchedInstances);
+
+            //List<Vehicle> vehicles = vehicleStates.Select(vs => vs.ReadOnlyVehicle).ToList();
+            //vehicles.Where(v => v.BubbleLeader == v).ToList().ForEach(v => vehicles.AddRange(v.NearbyVehicles));
+            //vehicles = vehicles.Distinct().ToList();
+
+            //vehicles.ForEach(v => UpdateLogicInstance(v, dt, v.AccelerationBody / StandardGravity));
         }
 
 
@@ -150,15 +242,10 @@ namespace KSAGEffects
         }
 
         [HarmonyPatch(typeof(Vehicle), "OnKey"), HarmonyPrefix]
-        public static bool Vehicle_OnKey_Prefix(Vehicle __instance)
-        {
-            KSAGEffectsLogicInstance logicInstance = GetLogicInstance(__instance);
-
-            return !logicInstance.Enabled || logicInstance.ConsciousnessLevel >= 0.05f;
-        }
+        public static bool Vehicle_OnKey_Prefix(Vehicle __instance) => GetVehicleInstances(__instance).All(gInstance => !gInstance.Enabled || gInstance.ConsciousnessLevel >= 0.05f);
 
         public static double StandardGravity => KSA.Constants.STANDARD_GRAVITY;
-        public static float vignetteShape = 2.0f; // 1.0 is circular, higher streches it into an oval
+        public static float vignetteShape = 2.0f; // 1.0 is circular, higher stretches it into an oval
         public static float screenSizeAdjustment = 1.0f; // Screen ratio adjustment for the vignette effect, includes vignetteShape
         public static float edgeDistance = 1.0f;
 
@@ -184,23 +271,36 @@ namespace KSAGEffects
                 ImGuiCond.FirstUseEver
             );
 
+#if DEBUG
+            SyncVirtualInstances();
+#endif
+
             // Patch Vehicle.dispose instead
             // Remove GEffectsLogic internal dictionary. No internal instances should be kept, offload the entire lifecycle management to the user
             foreach (var item in GEffectsInstances)
             {
-                if (item.Key.IsDisposed) GEffectsInstances.Remove(item.Key);
+#if DEBUG
+                if (Universe.KittenRoster.Find(item.Key) == null && !_virtualInstanceKeys.Contains(item.Key)) GEffectsInstances.Remove(item.Key);
+#else
+                if (Universe.KittenRoster.Find(item.Key) == null) GEffectsInstances.Remove(item.Key);
+#endif
             }
 
             // Create a debug window for showing g forces and calculated effect parameters
             if (ImGui.Begin("G Effects debug window", ref showDebugWindow, ImGuiWindowFlags.NoSavedSettings))
             {
-                Dictionary<Vehicle, KSAGEffectsLogicInstance> instances = new(GEffectsInstances);
+#if DEBUG
+                ImGui.SetNextItemWidth(200.0f);
+                ImGui.InputInt("Virtual instances", ref _virtualInstanceCount);
+                _virtualInstanceCount = Math.Max(0, _virtualInstanceCount);
+#endif
+
+                Dictionary<string, KSAGEffectsLogicInstance> instances = new(GEffectsInstances);
 
                 Vehicle? activeVehicle = Program.ControlledVehicle;
                 if (activeVehicle != null)
                 {
-                    instances.Remove(activeVehicle);
-                    KSAGEffectsLogicInstance instance = GetLogicInstance(activeVehicle);
+                    KSAGEffectsLogicInstance? instance = GetVehicleInstances(activeVehicle).MinBy(i => i.ConsciousnessLevel);
 
                     //if (instance.ConsciousnessLevel < 0.01f)
                     //{
@@ -208,14 +308,24 @@ namespace KSAGEffects
                     //}
 
                     ImGui.Text($"Effect parameters for vehicle {activeVehicle.Id}:");
-                    ImGui.Text($"Gz: {instance.LastGz:f4}");
-                    ImGui.Text($"Consciousness level: {instance.ConsciousnessLevel:f4}");
-                    ImGui.Text($"Grayscale level: {instance.VisualGrayscaleLevel:f4}");
-                    ImGui.Text($"Tunnel vision level: {instance.VisualTunnelVisionLevel:f4}");
-                    ImGui.Text($"Redout level: {instance.VisualRedoutLevel:f4}");
-                    ImGui.Text($"Film grain level: {instance.VisualFilmGrainLevel:f4}");
-                    ImGui.Text($"Blur level: {instance.VisualBlurLevel:f4}");
-                    ImGui.Text($"Consciousness level: {instance.VisualLoCLevel:f4}");
+                    if (instance == null)
+                    {
+                        ImGui.Text("No kittens found for this vehicle.");
+                        ImGui.End();
+                        return;
+                    }
+                    else
+                    {
+                        ImGui.Text($"G: {Math.Sqrt(Math.Pow(instance.LastGx, 2) + Math.Pow(instance.LastGy, 2) + Math.Pow(instance.LastGz, 2)):f4}");
+                        ImGui.Text($"Gx: {instance.LastGx:f4}, Gy: {instance.LastGy:f4}, Gz: {instance.LastGz:f4}");
+                        ImGui.Text($"Consciousness level: {instance.ConsciousnessLevel:f4}");
+                        ImGui.Text($"Grayscale level: {instance.VisualGrayscaleLevel:f4}");
+                        ImGui.Text($"Tunnel vision level: {instance.VisualTunnelVisionLevel:f4}");
+                        ImGui.Text($"Redout level: {instance.VisualRedoutLevel:f4}");
+                        ImGui.Text($"Film grain level: {instance.VisualFilmGrainLevel:f4}");
+                        ImGui.Text($"Blur level: {instance.VisualBlurLevel:f4}");
+                        ImGui.Text($"Consciousness level: {instance.VisualLoCLevel:f4}");
+                    }
 
                     if (instance.Enabled && ImGui.Button("Disable")) instance.Enabled = false;
                     else if (!instance.Enabled && ImGui.Button("Enable")) instance.Enabled = true;
@@ -340,11 +450,11 @@ namespace KSAGEffects
                 ImGui.TableSetupColumn("Reset", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
                 ImGui.TableHeadersRow();
 
-                foreach (KeyValuePair<Vehicle, KSAGEffectsLogicInstance> item in instances)
+                foreach (KeyValuePair<string, KSAGEffectsLogicInstance> item in instances)
                 {
                     ImGui.TableNextRow();
                     ImGui.TableNextColumn();
-                    ImGui.Text(item.Key.Id);
+                    ImGui.Text(item.Key);
                     ImGui.TableNextColumn();
                     ImGui.PushID($"{item.Key}_Gz");
                     ImGui.Text($"{item.Value.LastGz:f4}");
