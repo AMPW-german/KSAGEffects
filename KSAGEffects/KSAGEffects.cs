@@ -35,7 +35,7 @@ namespace KSAGEffects
                 if (!(iVASeat.AssignedKittenHash == KeyHash.Zero))
                 {
                     KittenRosterEntryData? kittenRosterEntryData = Universe.KittenRoster.Find(iVASeat.AssignedKittenHash);
-                    if (kittenRosterEntryData != null)
+                    if (kittenRosterEntryData != null && !kittenRosterEntryData.Kia && kittenRosterEntryData.AssignedToVehicle)
                     {
                         instances.Add(GetLogicInstance(kittenRosterEntryData.Name));
                     }
@@ -43,6 +43,33 @@ namespace KSAGEffects
             }
             return instances;
         }
+
+        private struct PendingKittenDeath
+        {
+            public Vehicle Vehicle;
+            public IVASeat? Seat;
+            public KittenRosterEntryData Entry;
+        }
+
+        private static readonly List<PendingKittenDeath> _pendingKittenDeaths = new();
+
+        private static void RemoveLogicInstance(string kittenName)
+        {
+            if (GEffectsInstances.TryGetValue(kittenName, out KSAGEffectsLogicInstance? instance))
+            {
+                GEffectsInstances.Remove(kittenName);
+                instance.Dispose();
+            }
+        }
+
+        // Every path that takes a kitten off a vehicle mission (recovery, vehicle
+        // destruction, death, crew reassignment, save-load cleanup) ends in one of
+        // these two roster entry methods, so they are the single cleanup point.
+        [HarmonyPatch(typeof(KittenRosterEntryData), "LeaveVehicle"), HarmonyPostfix]
+        public static void KittenRosterEntry_LeaveVehicle_Postfix(KittenRosterEntryData __instance) => RemoveLogicInstance(__instance.Name);
+
+        [HarmonyPatch(typeof(KittenRosterEntryData), "EndMission"), HarmonyPostfix]
+        public static void KittenRosterEntry_EndMission_Postfix(KittenRosterEntryData __instance) => RemoveLogicInstance(__instance.Name);
 
         [StarMapImmediateLoad]
         public void Init(Mod definingMod)
@@ -73,13 +100,19 @@ namespace KSAGEffects
 
         private static readonly AccessTools.FieldRef<PhysicsBubble, List<VehicleUpdateState>> VehicleStatesRef =
             AccessTools.FieldRefAccess<PhysicsBubble, List<VehicleUpdateState>>("_vehicleStates");
+        // _overrideIsControllable is a static debug flag shared by all vehicles.
+        private static readonly AccessTools.FieldRef<bool> OverrideIsControllableRef =
+            AccessTools.StaticFieldRefAccess<bool>(AccessTools.Field(typeof(Vehicle), "_overrideIsControllable"));
+        private static readonly AccessTools.FieldRef<Vehicle, bool> HasProbeCoreRef =
+            AccessTools.FieldRefAccess<Vehicle, bool>("_hasProbeCore");
         private static readonly List<KSAGEffectsLogicInstance> _touchedInstances = new(capacity: 64);
+        private static bool _probeCoreAlertActive;
+        private const float ProbeCoreHintScale = 0.25f;
 #if DEBUG
         private static int _virtualInstanceCount;
         private static string? _virtualSyncedId;
         private static int _virtualSyncedCount = -1;
         private static readonly List<string> _virtualKeyPool = new();
-        private static readonly HashSet<string> _virtualInstanceKeys = new();
 
         private static void SyncVirtualInstances()
         {
@@ -88,12 +121,9 @@ namespace KSAGEffects
             if (id != _virtualSyncedId) _virtualKeyPool.Clear();
             _virtualSyncedId = id;
             _virtualSyncedCount = _virtualInstanceCount;
-            _virtualInstanceKeys.Clear();
             if (id == null) return;
             while (_virtualKeyPool.Count < _virtualInstanceCount)
                 _virtualKeyPool.Add($"{id}_gInstance_{_virtualKeyPool.Count}");
-            for (int i = 0; i < _virtualInstanceCount; i++)
-                _virtualInstanceKeys.Add(_virtualKeyPool[i]);
         }
 #endif
 
@@ -102,6 +132,7 @@ namespace KSAGEffects
         {
             ReadOnlySpan<PhysicsBubble> bubbles = __instance.SyncWindowBubbles;
             _touchedInstances.Clear();
+            _pendingKittenDeaths.Clear();
 #if DEBUG
             SyncVirtualInstances();
 #endif
@@ -122,8 +153,16 @@ namespace KSAGEffects
                     if (vehicle is KittenEva)
                     {
                         KSAGEffectsLogicInstance instance = GetLogicInstance(vehicle.Id);
-                        instance.AddPendingInput(dt, g.X, g.Y, g.Z);
+                        instance.AddPendingInput(dt, g.X, g.Y, g.Z, smoothInputs: true);
                         _touchedInstances.Add(instance);
+                        if (instance.IsDead)
+                        {
+                            KittenRosterEntryData? entry = Universe.KittenRoster.Find(vehicle.Id);
+                            if (entry != null)
+                            {
+                                _pendingKittenDeaths.Add(new PendingKittenDeath { Vehicle = vehicle, Entry = entry });
+                            }
+                        }
                     }
                     else for (int i = 0; i < vehicle.Crew.Length; i++)
                     {
@@ -131,7 +170,7 @@ namespace KSAGEffects
                         if (!(iVASeat.AssignedKittenHash == KeyHash.Zero))
                         {
                             KittenRosterEntryData? kittenRosterEntryData = Universe.KittenRoster.Find(iVASeat.AssignedKittenHash);
-                            if (kittenRosterEntryData != null)
+                            if (kittenRosterEntryData != null && !kittenRosterEntryData.Kia && kittenRosterEntryData.AssignedToVehicle)
                             {
                                 // Seat axes are authored in the part's assembly frame.
                                 // Transform directions into the vehicle/body frame.
@@ -151,6 +190,10 @@ namespace KSAGEffects
                                 KSAGEffectsLogicInstance instance = GetLogicInstance(kittenRosterEntryData.Name);
                                 instance.AddPendingInput(dt, gx, gy, gz);
                                 _touchedInstances.Add(instance);
+                                if (instance.IsDead)
+                                {
+                                    _pendingKittenDeaths.Add(new PendingKittenDeath { Vehicle = vehicle, Seat = iVASeat, Entry = kittenRosterEntryData });
+                                }
                             }
                         }
                     }
@@ -168,6 +211,7 @@ namespace KSAGEffects
                 }
             }
 
+            ApplyPendingKittenDeaths();
             GEffectsScheduler.Dispatch(_touchedInstances);
 
             //List<Vehicle> vehicles = vehicleStates.Select(vs => vs.ReadOnlyVehicle).ToList();
@@ -175,6 +219,39 @@ namespace KSAGEffects
             //vehicles = vehicles.Distinct().ToList();
 
             //vehicles.ForEach(v => UpdateLogicInstance(v, dt, v.AccelerationBody / StandardGravity));
+        }
+
+        private static void ApplyPendingKittenDeaths()
+        {
+            foreach (PendingKittenDeath death in _pendingKittenDeaths)
+            {
+                if (death.Entry.Kia) continue;
+                death.Entry.Kill(death.Vehicle.HasLaunched, KittenDeathCause.ExcessiveGForce);
+                if (death.Seat != null)
+                {
+                    death.Seat.AssignedKittenHash = KeyHash.Zero;
+                    TimedAlert.CreateWarning(death.Entry.Name + " died: excessive G-force!", 10.0);
+                }
+                else
+                {
+                    TimedAlert.CreateWarning(death.Entry.Name + " died on EVA: excessive G-force!", 10.0);
+                    Universe.DestroyVehicle(death.Vehicle, CrewDisposition.Kill, KittenDeathCause.ExcessiveGForce);
+                }
+            }
+            _pendingKittenDeaths.Clear();
+        }
+
+        // The physiological model already kills kittens at their G-tolerance, so
+        // the stock structural G-load check is redundant for EVA kittens. The
+        // frame's peak G-load is the only input to that check; zeroing it for
+        // KittenEva states leaves kitten impact and dynamic-pressure destruction intact.
+        [HarmonyPatch(typeof(PhysicsBubble), "DetectStructuralFailure"), HarmonyPrefix]
+        public static void PhysicsBubble_DetectStructuralFailure_Prefix(VehicleUpdateState vehicleState)
+        {
+            if (vehicleState.IsKitten)
+            {
+                vehicleState.PeakGLoad = 0;
+            }
         }
 
 
@@ -241,8 +318,47 @@ namespace KSAGEffects
             }
         }
 
-        [HarmonyPatch(typeof(Vehicle), "OnKey"), HarmonyPrefix]
-        public static bool Vehicle_OnKey_Prefix(Vehicle __instance) => GetVehicleInstances(__instance).All(gInstance => !gInstance.Enabled || gInstance.ConsciousnessLevel >= 0.05f);
+        private enum CrewGState
+        {
+            NoCrew,
+            Able,
+            AllUnconscious
+        }
+
+        // Returns Able as soon as one living crew member can still fly
+        // (conscious, effects disabled, or without a G-effects instance).
+        private static CrewGState EvaluateCrewGState(Vehicle vehicle)
+        {
+            bool anyCrew = false;
+            ReadOnlySpan<IVASeat> crew = vehicle.Crew;
+            for (int i = 0; i < crew.Length; i++)
+            {
+                IVASeat seat = crew[i];
+                if (seat.AssignedKittenHash == KeyHash.Zero) continue;
+                KittenRosterEntryData? entry = Universe.KittenRoster.Find(seat.AssignedKittenHash);
+                if (entry == null || entry.Kia || !entry.AssignedToVehicle) continue;
+
+                anyCrew = true;
+                if (!GEffectsInstances.TryGetValue(entry.Name, out KSAGEffectsLogicInstance? instance) ||
+                    !instance.Enabled || !instance.IsUnconscious)
+                {
+                    return CrewGState.Able;
+                }
+            }
+            return anyCrew ? CrewGState.AllUnconscious : CrewGState.NoCrew;
+        }
+
+        // A vehicle is uncontrollable when every living crew member is G-unconscious,
+        // unless it has a probe core — mirroring the game's own incapacitation rule.
+        // This plugs into the game's ControlsLockout path (OnKey rejection,
+        // flight computer gating, "out of control" alert).
+        [HarmonyPatch(typeof(Vehicle), "get_IsControllable"), HarmonyPostfix]
+        public static void Vehicle_IsControllable_Postfix(Vehicle __instance, ref bool __result)
+        {
+            if (!__result || OverrideIsControllableRef()) return;
+            if (EvaluateCrewGState(__instance) == CrewGState.AllUnconscious)
+                __result = HasProbeCoreRef(__instance);
+        }
 
         public static double StandardGravity => KSA.Constants.STANDARD_GRAVITY;
         public static float vignetteShape = 2.0f; // 1.0 is circular, higher stretches it into an oval
@@ -253,6 +369,22 @@ namespace KSAGEffects
         [StarMapAfterGui]
         public unsafe void AfterGui(double dt)
         {
+            // The probe-core crew alert is gameplay information, so it must fire
+            // even while the debug window (and with it the shader effects) is closed.
+            Vehicle? probeVehicle = Program.ControlledVehicle;
+            bool probeCoreMode = false;
+            if (probeVehicle != null &&
+                EvaluateCrewGState(probeVehicle) == CrewGState.AllUnconscious &&
+                HasProbeCoreRef(probeVehicle))
+            {
+                probeCoreMode = true;
+                if (!_probeCoreAlertActive)
+                {
+                    TimedAlert.CreateWarning(probeVehicle.Id + ": all crew unconscious, probe core engaged", 10.0);
+                }
+            }
+            _probeCoreAlertActive = probeCoreMode;
+
             if (!showDebugWindow) return;
 
             if (GEffectBuffer.LookupSpan != null)
@@ -275,17 +407,6 @@ namespace KSAGEffects
             SyncVirtualInstances();
 #endif
 
-            // Patch Vehicle.dispose instead
-            // Remove GEffectsLogic internal dictionary. No internal instances should be kept, offload the entire lifecycle management to the user
-            foreach (var item in GEffectsInstances)
-            {
-#if DEBUG
-                if (Universe.KittenRoster.Find(item.Key) == null && !_virtualInstanceKeys.Contains(item.Key)) GEffectsInstances.Remove(item.Key);
-#else
-                if (Universe.KittenRoster.Find(item.Key) == null) GEffectsInstances.Remove(item.Key);
-#endif
-            }
-
             // Create a debug window for showing g forces and calculated effect parameters
             if (ImGui.Begin("G Effects debug window", ref showDebugWindow, ImGuiWindowFlags.NoSavedSettings))
             {
@@ -300,7 +421,21 @@ namespace KSAGEffects
                 Vehicle? activeVehicle = Program.ControlledVehicle;
                 if (activeVehicle != null)
                 {
-                    KSAGEffectsLogicInstance? instance = GetVehicleInstances(activeVehicle).MinBy(i => i.ConsciousnessLevel);
+                    List<KSAGEffectsLogicInstance> crewInstances = GetVehicleInstances(activeVehicle);
+                    if (activeVehicle is KittenEva)
+                    {
+                        crewInstances.Add(GetLogicInstance(activeVehicle.Id));
+                    }
+
+                    CrewGState crewGState = EvaluateCrewGState(activeVehicle);
+
+                    // Screen effects follow the crew member best able to fly. When
+                    // everyone is out, the worst instance drives the blackout — or,
+                    // on probe-core flights, only a faint peripheral hint.
+                    KSAGEffectsLogicInstance? instance = crewInstances.Count == 0 ? null
+                        : crewGState == CrewGState.AllUnconscious
+                            ? crewInstances.MinBy(i => i.ConsciousnessLevel)
+                            : crewInstances.MaxBy(i => i.ConsciousnessLevel);
 
                     //if (instance.ConsciousnessLevel < 0.01f)
                     //{
@@ -308,6 +443,7 @@ namespace KSAGEffects
                     //}
 
                     ImGui.Text($"Effect parameters for vehicle {activeVehicle.Id}:");
+                    if (probeCoreMode) ImGui.Text("Probe core engaged - all crew G-unconscious");
                     if (instance == null)
                     {
                         ImGui.Text("No kittens found for this vehicle.");
@@ -343,7 +479,7 @@ namespace KSAGEffects
                         Span<double> weights = stackalloc double[GaussianBlurMaxRadius + 1];
 
                         // Max blurHorizontal radius = 20 px
-                        float radius = instance.Enabled ? GaussianBlurMaxRadius * (float)instance.VisualBlurLevel : 0.0f;
+                        float radius = instance.Enabled && !probeCoreMode ? GaussianBlurMaxRadius * (float)instance.VisualBlurLevel : 0.0f;
 
                         CalculateGaussianWeights(radius, weights, out int shaderRadius);
                         blurHorizontal.Radius = shaderRadius;
@@ -376,7 +512,18 @@ namespace KSAGEffects
                         data[0].FilmGrainData.Z = 2.0f; // film grain scale
                         data[0].FilmGrainData.W += (float)dt;
 
-                        if (instance.Enabled)
+                        if (probeCoreMode && instance.Enabled)
+                        {
+                            // The probe core is flying while the crew is out: keep the
+                            // view navigable and only hint at the crew's state in the
+                            // periphery.
+                            data[0].GrayScaleLevel = 0.0f;
+                            data[0].TunnelVisionLevel = (float)(instance.VisualTunnelVisionLevel * ProbeCoreHintScale);
+                            data[0].RedoutLevel = (float)(instance.VisualRedoutLevel * ProbeCoreHintScale);
+                            data[0].FilmGrainLevel = 0.0f;
+                            data[0].LoCLevel = 0.0f;
+                        }
+                        else if (instance.Enabled)
                         {
                             data[0].GrayScaleLevel = (float)instance.VisualGrayscaleLevel;
                             data[0].TunnelVisionLevel = (float)instance.VisualTunnelVisionLevel;

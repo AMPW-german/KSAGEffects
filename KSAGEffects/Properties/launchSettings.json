@@ -6,7 +6,12 @@
     "StarMapStart": {
       "commandName": "Executable",
       "executablePath": "C:\\Users\\AMPW\\Documents\\My Games\\Kitten Space Agency\\mods\\StarMap\\StarMap.exe",
-      "workingDirectory": "C:\\Users\\AMPW\\Documents\\My Games\\Kitten Space Agency\\mods\\StarMap"
+      "workingDirectory": "C:\\Users\\AMPW\\Documents\\My Games\\Kitten Space Agency\\mods\\StarMap",
+      "environmentVariables": {
+        "DOTNET_DbgEnableMiniDump": "1",
+        "DOTNET_DbgMiniDumpType": "1",
+        "DOTNET_DbgMiniDumpName": "\"$env:TEMP\\ksa_%p_%t.dmp\""
+      }
     }
   }
 }

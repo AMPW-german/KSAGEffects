@@ -24,12 +24,42 @@ namespace KSAGEffects
         private double _pendingGyDt;
         private double _pendingGzDt;
 
-        internal void AddPendingInput(double dt, double gx, double gy, double gz)
+        // EVA locomotion servos emit high-frequency acceleration jitter that the
+        // model would otherwise integrate as sustained load.
+        private const double InputSmoothingTauSeconds = 0.4;
+        private double _smoothGx;
+        private double _smoothGy;
+        private double _smoothGz;
+        private bool _hasSmoothingState;
+
+        internal void AddPendingInput(double dt, double gx, double gy, double gz, bool smoothInputs = false)
         {
+            if (smoothInputs)
+            {
+                if (_hasSmoothingState)
+                {
+                    double alpha = 1.0 - Math.Exp(-dt / InputSmoothingTauSeconds);
+                    _smoothGx += (gx - _smoothGx) * alpha;
+                    _smoothGy += (gy - _smoothGy) * alpha;
+                    _smoothGz += (gz - _smoothGz) * alpha;
+                }
+                else
+                {
+                    _smoothGx = gx;
+                    _smoothGy = gy;
+                    _smoothGz = gz;
+                    _hasSmoothingState = true;
+                }
+                gx = _smoothGx;
+                gy = _smoothGy;
+                gz = _smoothGz;
+            }
+
+            // Gy and Gz are inverted from KSA
             _pendingDt += dt;
             _pendingGxDt += gx * dt;
-            _pendingGyDt += gy * dt;
-            _pendingGzDt += gz * dt;
+            _pendingGyDt -= gy * dt;
+            _pendingGzDt -= gz * dt;
         }
 
         internal bool TryTakePending(out double dt, out double gx, out double gy, out double gz)
