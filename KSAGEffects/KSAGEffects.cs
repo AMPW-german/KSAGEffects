@@ -5,9 +5,13 @@ using HarmonyLib;
 using KSA;
 using KSAGEffects.Logging;
 using KSAGEffects.Shaders;
+using KSAGEffects.Ui;
 using StarMap.API;
+using StarMap.API.Services;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
+using Tomlet;
+using Tomlet.Attributes;
 
 namespace KSAGEffects
 {
@@ -15,6 +19,17 @@ namespace KSAGEffects
     [HarmonyPatch]
     public class KSAGEffects
     {
+        private readonly IModMenuService _modMenu;
+        private readonly GEffectsPlayerUi _playerUi = new();
+        private readonly GEffectsDebugUi _debugUi = new();
+        private IDisposable? _statusMenuItem;
+        private IDisposable? _diagnosticsMenuItem;
+
+        public KSAGEffects(IModMenuService modMenu)
+        {
+            _modMenu = modMenu;
+        }
+
         public const int GaussianBlurMaxRadius = 20; // Max blurHorizontal radius in pixels
         public static KeyHash GaussianBlurHorizontalHash = KeyHash.Make("GEffectsGaussianBlurShaderHorizontalPostPushConstantsBuffer");
         public static KeyHash GaussianBlurVerticalHash = KeyHash.Make("GEffectsGaussianBlurShaderVerticalPostPushConstantsBuffer");
@@ -79,6 +94,48 @@ namespace KSAGEffects
             harmony.PatchAll();
             new LogicLogging();
             GEffectsLogic.LogicSettings.DebugMode = false;
+            _statusMenuItem = _modMenu.AddModMenuItem("G Effects status", _playerUi.OpenExpanded);
+            if (ReadDebugFlag())
+                _diagnosticsMenuItem = _modMenu.AddModMenuItem("G Effects diagnostics", () => _debugUi.IsOpen = true);
+        }
+
+        [StarMapUnload]
+        public void Unload()
+        {
+            _statusMenuItem?.Dispose();
+            _diagnosticsMenuItem?.Dispose();
+        }
+
+        private static bool ReadDebugFlag()
+        {
+            try
+            {
+                LocalManifest manifest = TomletMain.To<LocalManifest>(File.ReadAllText(ModLibrary.LocalManifestPath));
+                return manifest.Mods.FirstOrDefault(mod => mod.Id == "KSAGEffects" && mod.Enabled)?.Debug ?? false;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        private sealed class LocalManifest
+        {
+            [TomlDoNotInlineObject]
+            [TomlField("mods")]
+            public List<LocalModEntry> Mods = [];
+        }
+
+        private sealed class LocalModEntry
+        {
+            [TomlField("id")]
+            public string Id = "";
+
+            [TomlField("enabled")]
+            public bool Enabled = true;
+
+            [TomlField("debug")]
+            public bool Debug = false;
         }
 
         // Vehicles that were not in the FullPhysics or SingleSurfaceMotion updates are (probably) in free fall in space
@@ -103,8 +160,6 @@ namespace KSAGEffects
         // _overrideIsControllable is a static debug flag shared by all vehicles.
         private static readonly AccessTools.FieldRef<bool> OverrideIsControllableRef =
             AccessTools.StaticFieldRefAccess<bool>(AccessTools.Field(typeof(Vehicle), "_overrideIsControllable"));
-        private static readonly AccessTools.FieldRef<Vehicle, bool> HasProbeCoreRef =
-            AccessTools.FieldRefAccess<Vehicle, bool>("_hasProbeCore");
         private static readonly List<KSAGEffectsLogicInstance> _touchedInstances = new(capacity: 64);
         private static bool _probeCoreAlertActive;
         private const float ProbeCoreHintScale = 0.25f;
@@ -349,15 +404,19 @@ namespace KSAGEffects
         }
 
         // A vehicle is uncontrollable when every living crew member is G-unconscious,
-        // unless it has a probe core — mirroring the game's own incapacitation rule.
+        // unless a powered probe core takes over — mirroring the game's own
+        // incapacitation rule. The game resolves control state in
+        // Vehicle.ScanControls/ComputeControl: command-pod crew feed
+        // CommandPodCrew and probe cores feed ProbeCorePower. G-unconsciousness is
+        // an additional incapacitation cause, so downgrade pod Able ->
+        // Incapacitated and let the game's probe-core power model decide.
         // This plugs into the game's ControlsLockout path (OnKey rejection,
         // flight computer gating, "out of control" alert).
-        [HarmonyPatch(typeof(Vehicle), "get_IsControllable"), HarmonyPostfix]
-        public static void Vehicle_IsControllable_Postfix(Vehicle __instance, ref bool __result)
+        [HarmonyPatch(typeof(Vehicle), "ScanControls"), HarmonyPostfix]
+        public static void Vehicle_ScanControls_Postfix(Vehicle __instance, ref CommandPodCrew pod)
         {
-            if (!__result || OverrideIsControllableRef()) return;
-            if (EvaluateCrewGState(__instance) == CrewGState.AllUnconscious)
-                __result = HasProbeCoreRef(__instance);
+            if (pod == CommandPodCrew.Able && EvaluateCrewGState(__instance) == CrewGState.AllUnconscious)
+                pod = CommandPodCrew.Incapacitated;
         }
 
         public static double StandardGravity => KSA.Constants.STANDARD_GRAVITY;
@@ -365,289 +424,124 @@ namespace KSAGEffects
         public static float screenSizeAdjustment = 1.0f; // Screen ratio adjustment for the vignette effect, includes vignetteShape
         public static float edgeDistance = 1.0f;
 
-        private bool showDebugWindow = true;
         [StarMapAfterGui]
         public unsafe void AfterGui(double dt)
         {
-            // The probe-core crew alert is gameplay information, so it must fire
-            // even while the debug window (and with it the shader effects) is closed.
-            Vehicle? probeVehicle = Program.ControlledVehicle;
+            Vehicle? activeVehicle = Program.ControlledVehicle;
             bool probeCoreMode = false;
-            if (probeVehicle != null &&
-                EvaluateCrewGState(probeVehicle) == CrewGState.AllUnconscious &&
-                HasProbeCoreRef(probeVehicle))
+            CrewGState crewGState = activeVehicle == null ? CrewGState.NoCrew : EvaluateCrewGState(activeVehicle);
+            if (activeVehicle != null &&
+                crewGState == CrewGState.AllUnconscious &&
+                !OverrideIsControllableRef() &&
+                activeVehicle.IsControllable)
             {
                 probeCoreMode = true;
                 if (!_probeCoreAlertActive)
                 {
-                    TimedAlert.CreateWarning(probeVehicle.Id + ": all crew unconscious, probe core engaged", 10.0);
+                    TimedAlert.CreateWarning(activeVehicle.Id + ": all crew unconscious, probe core engaged", 10.0);
                 }
             }
             _probeCoreAlertActive = probeCoreMode;
 
-            if (!showDebugWindow) return;
-
             if (GEffectBuffer.LookupSpan != null)
             {
+                Span<GEffectBuffer> data = GEffectBuffer.LookupSpan(GEffectBufferHash);
                 float2 screenSize = new(Program.MainViewport.Size.X, Program.MainViewport.Size.Y);
-
-                Span<GEffectBuffer> data = GEffectBuffer.LookupSpan(KeyHash.Make("GEffectBuffer"));
                 data[0].ScreenSizeAdjustment = vignetteShape * screenSize.Y / screenSize.X;
                 data[0].TunnelVisionColor = new float4(0.0f, 0.0f, 0.0f, 1.0f);
                 data[0].RedoutColor = new float4(1.0f, 0.0f, 0.0f, 1.0f);
                 data[0].LoCColor = new float4(0.0f, 0.0f, 0.0f, 1.0f);
+                Renderer renderer = Program.GetRenderer();
+                data[0].FilmGrainData.X = renderer.Extent.Width;
+                data[0].FilmGrainData.Y = renderer.Extent.Height;
+                data[0].FilmGrainData.Z = 2.0f;
+                data[0].FilmGrainData.W += (float)dt;
             }
-
-            ImGui.SetNextWindowPos(
-                new float2(100.0f, 100.0f),
-                ImGuiCond.FirstUseEver
-            );
 
 #if DEBUG
             SyncVirtualInstances();
 #endif
+            List<KSAGEffectsLogicInstance> crewInstances = activeVehicle == null
+                ? []
+                : GetVehicleInstances(activeVehicle);
+            if (activeVehicle is KittenEva)
+                crewInstances.Add(GetLogicInstance(activeVehicle.Id));
+            KSAGEffectsLogicInstance? instance = crewInstances.Count == 0 ? null
+                : crewGState == CrewGState.AllUnconscious
+                    ? crewInstances.MinBy(item => item.ConsciousnessLevel)
+                    : crewInstances.MaxBy(item => item.ConsciousnessLevel);
 
-            // Create a debug window for showing g forces and calculated effect parameters
-            if (ImGui.Begin("G Effects debug window", ref showDebugWindow, ImGuiWindowFlags.NoSavedSettings))
+            UpdateBlur(instance, probeCoreMode);
+            UpdateVisualEffects(instance, probeCoreMode);
+
+            string crewStatus = activeVehicle switch
             {
-#if DEBUG
-                ImGui.SetNextItemWidth(200.0f);
-                ImGui.InputInt("Virtual instances", ref _virtualInstanceCount);
-                _virtualInstanceCount = Math.Max(0, _virtualInstanceCount);
-#endif
+                null => "No controlled vessel; current G-force status is unavailable.",
+                KittenEva => "EVA crew member; showing their current G-force response.",
+                _ when probeCoreMode => "All assigned crew are G-unconscious; the probe core is controlling the vessel.",
+                _ when crewGState == CrewGState.NoCrew => "No living crew are assigned; crew G-effects cannot be assessed.",
+                _ when crewGState == CrewGState.AllUnconscious => "All assigned crew are G-unconscious; vessel control is unavailable.",
+                _ => "Vessel control is available; at least one crew member can still fly."
+            };
+            _playerUi.Draw(activeVehicle, instance, crewStatus, crewInstances);
+            _debugUi.Draw();
+        }
 
-                Dictionary<string, KSAGEffectsLogicInstance> instances = new(GEffectsInstances);
-
-                Vehicle? activeVehicle = Program.ControlledVehicle;
-                if (activeVehicle != null)
-                {
-                    List<KSAGEffectsLogicInstance> crewInstances = GetVehicleInstances(activeVehicle);
-                    if (activeVehicle is KittenEva)
-                    {
-                        crewInstances.Add(GetLogicInstance(activeVehicle.Id));
-                    }
-
-                    CrewGState crewGState = EvaluateCrewGState(activeVehicle);
-
-                    // Screen effects follow the crew member best able to fly. When
-                    // everyone is out, the worst instance drives the blackout — or,
-                    // on probe-core flights, only a faint peripheral hint.
-                    KSAGEffectsLogicInstance? instance = crewInstances.Count == 0 ? null
-                        : crewGState == CrewGState.AllUnconscious
-                            ? crewInstances.MinBy(i => i.ConsciousnessLevel)
-                            : crewInstances.MaxBy(i => i.ConsciousnessLevel);
-
-                    //if (instance.ConsciousnessLevel < 0.01f)
-                    //{
-                    //    Vehicle.ControlsLockout
-                    //}
-
-                    ImGui.Text($"Effect parameters for vehicle {activeVehicle.Id}:");
-                    if (probeCoreMode) ImGui.Text("Probe core engaged - all crew G-unconscious");
-                    if (instance == null)
-                    {
-                        ImGui.Text("No kittens found for this vehicle.");
-                        ImGui.End();
-                        return;
-                    }
-                    else
-                    {
-                        ImGui.Text($"G: {Math.Sqrt(Math.Pow(instance.LastGx, 2) + Math.Pow(instance.LastGy, 2) + Math.Pow(instance.LastGz, 2)):f4}");
-                        ImGui.Text($"Gx: {instance.LastGx:f4}, Gy: {instance.LastGy:f4}, Gz: {instance.LastGz:f4}");
-                        ImGui.Text($"Consciousness level: {instance.ConsciousnessLevel:f4}");
-                        ImGui.Text($"Grayscale level: {instance.VisualGrayscaleLevel:f4}");
-                        ImGui.Text($"Tunnel vision level: {instance.VisualTunnelVisionLevel:f4}");
-                        ImGui.Text($"Redout level: {instance.VisualRedoutLevel:f4}");
-                        ImGui.Text($"Film grain level: {instance.VisualFilmGrainLevel:f4}");
-                        ImGui.Text($"Blur level: {instance.VisualBlurLevel:f4}");
-                        ImGui.Text($"Consciousness level: {instance.VisualLoCLevel:f4}");
-                    }
-
-                    if (instance.Enabled && ImGui.Button("Disable")) instance.Enabled = false;
-                    else if (!instance.Enabled && ImGui.Button("Enable")) instance.Enabled = true;
-                    if (ImGui.Button("Reset")) instance.Reset();
-                    if (ImGui.Button($"Negative G: {negativeG}")) negativeG = !negativeG;
-
-                    // Very Important TODO: Fix completly black screen when instance is disabled
-                    if (GEffectsBlurPushConstantsBuffer.LookupSpan != null)
-                    {
-                        Span<GEffectsBlurPushConstantsBuffer> dataHorizontal = GEffectsBlurPushConstantsBuffer.LookupSpan(GaussianBlurHorizontalHash);
-                        ref GEffectsBlurPushConstantsBuffer blurHorizontal = ref dataHorizontal[0];
-                        Span<GEffectsBlurPushConstantsBuffer> dataVertical = GEffectsBlurPushConstantsBuffer.LookupSpan(GaussianBlurVerticalHash);
-                        ref GEffectsBlurPushConstantsBuffer blurVertical = ref dataVertical[0];
-
-                        Span<double> weights = stackalloc double[GaussianBlurMaxRadius + 1];
-
-                        // Max blurHorizontal radius = 20 px
-                        float radius = instance.Enabled && !probeCoreMode ? GaussianBlurMaxRadius * (float)instance.VisualBlurLevel : 0.0f;
-
-                        CalculateGaussianWeights(radius, weights, out int shaderRadius);
-                        blurHorizontal.Radius = shaderRadius;
-                        blurVertical.Radius = shaderRadius;
-
-                        fixed (float* destination = blurHorizontal.Weights)
-                        {
-                            for (int i = 0; i <= GaussianBlurMaxRadius; i++)
-                            {
-                                destination[i] = (float)weights[i];
-                            }
-                        }
-                        fixed (float* destination = blurVertical.Weights)
-                        {
-                            for (int i = 0; i <= GaussianBlurMaxRadius; i++)
-                            {
-                                destination[i] = (float)weights[i];
-                            }
-                        }
-                    }
-
-                    if (GEffectBuffer.LookupSpan != null)
-                    {
-                        //float value = 1.0f - (activeVehicle.GetManualThrottle() - 0.01f) * 1.0101f;
-                        Span<GEffectBuffer> data = GEffectBuffer.LookupSpan(GEffectBufferHash);
-
-                        Renderer renderer = Program.GetRenderer();
-                        data[0].FilmGrainData.X = renderer.Extent.Width;
-                        data[0].FilmGrainData.Y = renderer.Extent.Height;
-                        data[0].FilmGrainData.Z = 2.0f; // film grain scale
-                        data[0].FilmGrainData.W += (float)dt;
-
-                        if (probeCoreMode && instance.Enabled)
-                        {
-                            // The probe core is flying while the crew is out: keep the
-                            // view navigable and only hint at the crew's state in the
-                            // periphery.
-                            data[0].GrayScaleLevel = 0.0f;
-                            data[0].TunnelVisionLevel = (float)(instance.VisualTunnelVisionLevel * ProbeCoreHintScale);
-                            data[0].RedoutLevel = (float)(instance.VisualRedoutLevel * ProbeCoreHintScale);
-                            data[0].FilmGrainLevel = 0.0f;
-                            data[0].LoCLevel = 0.0f;
-                        }
-                        else if (instance.Enabled)
-                        {
-                            data[0].GrayScaleLevel = (float)instance.VisualGrayscaleLevel;
-                            data[0].TunnelVisionLevel = (float)instance.VisualTunnelVisionLevel;
-                            data[0].RedoutLevel = (float)instance.VisualRedoutLevel;
-                            data[0].FilmGrainLevel = (float)instance.VisualFilmGrainLevel;
-                            data[0].LoCLevel = (float)instance.VisualLoCLevel;
-                        }
-                        else
-                        {
-                            data[0].GrayScaleLevel = 0.0f;
-                            data[0].TunnelVisionLevel = 0.0f;
-                            data[0].RedoutLevel = 0.0f;
-                            data[0].FilmGrainLevel = 0.0f;
-                            data[0].LoCLevel = 0.0f;
-                        }
-                    }
-                }
-                else
-                {
-                    if (GEffectsBlurPushConstantsBuffer.LookupSpan != null)
-                    {
-                        Span<GEffectsBlurPushConstantsBuffer> dataHorizontal = GEffectsBlurPushConstantsBuffer.LookupSpan(GaussianBlurHorizontalHash);
-                        ref GEffectsBlurPushConstantsBuffer blurHorizontal = ref dataHorizontal[0];
-                        Span<GEffectsBlurPushConstantsBuffer> dataVertical = GEffectsBlurPushConstantsBuffer.LookupSpan(GaussianBlurVerticalHash);
-                        ref GEffectsBlurPushConstantsBuffer blurVertical = ref dataVertical[0];
-
-                        Span<double> weights = stackalloc double[GaussianBlurMaxRadius + 1];
-
-                        CalculateGaussianWeights(0.0, weights, out int shaderRadius);
-                        blurHorizontal.Radius = shaderRadius;
-                        blurVertical.Radius = shaderRadius;
-
-                        fixed (float* destination = blurHorizontal.Weights)
-                        {
-                            for (int i = 0; i <= GaussianBlurMaxRadius; i++)
-                            {
-                                destination[i] = (float)weights[i];
-                            }
-                        }
-                        fixed (float* destination = blurVertical.Weights)
-                        {
-                            for (int i = 0; i <= GaussianBlurMaxRadius; i++)
-                            {
-                                destination[i] = (float)weights[i];
-                            }
-                        }
-                    }
-
-                    if (GEffectBuffer.LookupSpan != null)
-                    {
-                        Span<GEffectBuffer> data = GEffectBuffer.LookupSpan(GEffectBufferHash);
-                        data[0].GrayScaleLevel = 0.0f;
-                        data[0].TunnelVisionLevel = 0.0f;
-                        data[0].RedoutLevel = 0.0f;
-                        data[0].FilmGrainLevel = 0.0f;
-                        data[0].LoCLevel = 0.0f;
-                    }
-                }
-
-                ImGui.BeginTable("GEffectsInstancesTable", 11, ImGuiTableFlags.Borders | ImGuiTableFlags.Resizable);
-                ImGui.TableSetupColumn("Vehicle ID", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 150f);
-                ImGui.TableSetupColumn("Gz", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
-                ImGui.TableSetupColumn("Consciousness", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
-                ImGui.TableSetupColumn("Grayscale", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
-                ImGui.TableSetupColumn("Tunnel Vision", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
-                ImGui.TableSetupColumn("Redout", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
-                ImGui.TableSetupColumn("Film Grain", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
-                ImGui.TableSetupColumn("Blur", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
-                ImGui.TableSetupColumn("Visual LoC", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
-                ImGui.TableSetupColumn("Enabled", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
-                ImGui.TableSetupColumn("Reset", ImGuiTableColumnFlags.WidthFixed, initWidthOrWeight: 100f);
-                ImGui.TableHeadersRow();
-
-                foreach (KeyValuePair<string, KSAGEffectsLogicInstance> item in instances)
-                {
-                    ImGui.TableNextRow();
-                    ImGui.TableNextColumn();
-                    ImGui.Text(item.Key);
-                    ImGui.TableNextColumn();
-                    ImGui.PushID($"{item.Key}_Gz");
-                    ImGui.Text($"{item.Value.LastGz:f4}");
-                    ImGui.PopID();
-                    ImGui.TableNextColumn();
-                    ImGui.PushID($"{item.Key}_Consciousness");
-                    ImGui.Text($"{item.Value.ConsciousnessLevel:f4}");
-                    ImGui.PopID();
-                    ImGui.TableNextColumn();
-                    ImGui.PushID($"{item.Key}_Grayscale");
-                    ImGui.Text($"{item.Value.VisualGrayscaleLevel:f4}");
-                    ImGui.PopID();
-                    ImGui.TableNextColumn();
-                    ImGui.PushID($"{item.Key}_TunnelVision");
-                    ImGui.Text($"{item.Value.VisualTunnelVisionLevel:f4}");
-                    ImGui.PopID();
-                    ImGui.TableNextColumn();
-                    ImGui.PushID($"{item.Key}_Redout");
-                    ImGui.Text($"{item.Value.VisualRedoutLevel:f4}");
-                    ImGui.PopID();
-                    ImGui.TableNextColumn();
-                    ImGui.PushID($"{item.Key}_FilmGrain");
-                    ImGui.Text($"{item.Value.VisualFilmGrainLevel:f4}");
-                    ImGui.PopID();
-                    ImGui.TableNextColumn();
-                    ImGui.PushID($"{item.Key}_Blur");
-                    ImGui.Text($"{item.Value.VisualBlurLevel:f4}");
-                    ImGui.PopID();
-                    ImGui.TableNextColumn();
-                    ImGui.PushID($"{item.Key}_VisualLoC");
-                    ImGui.Text($"{item.Value.VisualLoCLevel:f4}");
-                    ImGui.PopID();
-                    ImGui.TableNextColumn();
-                    ImGui.PushID($"{item.Key}_Enabled");
-                    if (item.Value.Enabled && ImGui.Button("Disable")) item.Value.Enabled = false;
-                    else if (!item.Value.Enabled && ImGui.Button("Enable")) item.Value.Enabled = true;
-                    ImGui.PopID();
-                    ImGui.TableNextColumn();
-                    ImGui.PushID($"{item.Key}_Reset");
-                    if (ImGui.Button("Reset")) item.Value.Reset();
-                    ImGui.PopID();
-                }
-
-                ImGui.EndTable();
+        private static unsafe void UpdateBlur(KSAGEffectsLogicInstance? instance, bool probeCoreMode)
+        {
+            if (GEffectsBlurPushConstantsBuffer.LookupSpan == null) return;
+            Span<GEffectsBlurPushConstantsBuffer> dataHorizontal = GEffectsBlurPushConstantsBuffer.LookupSpan(GaussianBlurHorizontalHash);
+            ref GEffectsBlurPushConstantsBuffer blurHorizontal = ref dataHorizontal[0];
+            Span<GEffectsBlurPushConstantsBuffer> dataVertical = GEffectsBlurPushConstantsBuffer.LookupSpan(GaussianBlurVerticalHash);
+            ref GEffectsBlurPushConstantsBuffer blurVertical = ref dataVertical[0];
+            Span<double> weights = stackalloc double[GaussianBlurMaxRadius + 1];
+            float radius = instance is { Enabled: true } && !probeCoreMode
+                ? GaussianBlurMaxRadius * (float)instance.VisualBlurLevel
+                : 0.0f;
+            CalculateGaussianWeights(radius, weights, out int shaderRadius);
+            blurHorizontal.Radius = shaderRadius;
+            blurVertical.Radius = shaderRadius;
+            fixed (float* destination = blurHorizontal.Weights)
+            {
+                for (int i = 0; i <= GaussianBlurMaxRadius; i++)
+                    destination[i] = (float)weights[i];
             }
-            ImGui.End();
+            fixed (float* destination = blurVertical.Weights)
+            {
+                for (int i = 0; i <= GaussianBlurMaxRadius; i++)
+                    destination[i] = (float)weights[i];
+            }
+        }
+
+        private static void UpdateVisualEffects(KSAGEffectsLogicInstance? instance, bool probeCoreMode)
+        {
+            if (GEffectBuffer.LookupSpan == null) return;
+            Span<GEffectBuffer> data = GEffectBuffer.LookupSpan(GEffectBufferHash);
+            if (instance is not { Enabled: true })
+            {
+                data[0].GrayScaleLevel = 0.0f;
+                data[0].TunnelVisionLevel = 0.0f;
+                data[0].RedoutLevel = 0.0f;
+                data[0].FilmGrainLevel = 0.0f;
+                data[0].LoCLevel = 0.0f;
+                return;
+            }
+
+            if (probeCoreMode)
+            {
+                data[0].GrayScaleLevel = 0.0f;
+                data[0].TunnelVisionLevel = (float)(instance.VisualTunnelVisionLevel * ProbeCoreHintScale);
+                data[0].RedoutLevel = (float)(instance.VisualRedoutLevel * ProbeCoreHintScale);
+                data[0].FilmGrainLevel = 0.0f;
+                data[0].LoCLevel = 0.0f;
+                return;
+            }
+
+            data[0].GrayScaleLevel = (float)instance.VisualGrayscaleLevel;
+            data[0].TunnelVisionLevel = (float)instance.VisualTunnelVisionLevel;
+            data[0].RedoutLevel = (float)instance.VisualRedoutLevel;
+            data[0].FilmGrainLevel = (float)instance.VisualFilmGrainLevel;
+            data[0].LoCLevel = (float)instance.VisualLoCLevel;
         }
     }
 }
