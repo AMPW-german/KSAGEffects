@@ -8,148 +8,135 @@ internal sealed class GEffectsPlayerUi
 {
     private static float InterfaceScale => ImGuiHelper.InterfaceScale;
 
-    private static float ExpandedWindowWidth => 780.0f * InterfaceScale;
-    private static float WindowHeight => 400.0f * InterfaceScale;
-    private static float WindowHeightExpanded => 560.0f * InterfaceScale;
     private static float MinWindowHeight => 240.0f * InterfaceScale;
     private static float CrewDetailWindowWidth => 380.0f * InterfaceScale;
     private static float CrewDetailWindowHeight => 460.0f * InterfaceScale;
-    private const float WindowLeftFraction = 0.235f;
-    private const float WindowBottomFraction = 0.115f;
 
-    private bool _showWindow = true;
     private bool _expanded;
-    private bool _resizeOnNextFrame;
     private bool _crewPanelOpen;
     private readonly Dictionary<string, bool> _crewDetailWindows = new();
 
-    // Matches the status pane width in the expanded layout so toggling the crew panel does not reflow it.
-    private static float CollapsedWindowWidth
-    {
-        get
-        {
-            float padding = ConsoleStyle.ContentPaddingPx;
-            float bodyWidth = ExpandedWindowWidth - padding * 2f;
-            return (bodyWidth - padding) * 0.5f + padding * 2f;
-        }
-    }
+    private KSAGEffectsLogicInstance? _instance;
+    private string _crewStatusMessage = string.Empty;
+    private IReadOnlyList<KSAGEffectsLogicInstance> _crew = [];
 
     internal void OpenExpanded()
     {
-        _showWindow = true;
         _expanded = true;
-        _resizeOnNextFrame = true;
     }
 
     internal void Draw(
-        Vehicle? vehicle,
         KSAGEffectsLogicInstance? instance,
         string crewStatusMessage,
         IReadOnlyList<KSAGEffectsLogicInstance> crew)
     {
-        float windowWidth = _crewPanelOpen ? ExpandedWindowWidth : CollapsedWindowWidth;
-        float windowHeight = _expanded ? WindowHeightExpanded : WindowHeight;
-        if (_showWindow)
-        {
-            ImGui.SetNextWindowPos(
-                InitialWindowPosition(new float2(windowWidth, windowHeight)),
-                ImGuiCond.Appearing);
-            ImGui.SetNextWindowSizeConstraints(
-                new float2(windowWidth, MinWindowHeight),
-                new float2(windowWidth, float.MaxValue));
-        }
-        if (_showWindow && ConsoleStyle.BeginWindow(
-            "KSAGEffectsPlayer",
-            "G EFFECTS",
-            "GFX",
-            ref _showWindow,
-            new float2(windowWidth, windowHeight),
-            ImGuiWindowFlags.None,
-            _resizeOnNextFrame ? ImGuiCond.Always : ImGuiCond.FirstUseEver))
-        {
-            _resizeOnNextFrame = false;
-            DrawCrewPanelToggle();
-
-            ConsoleStyle.BeginBody();
-            ConsoleStyle.PushWidgetStyle();
-            if (_crewPanelOpen)
-            {
-                DrawCrewLayout(instance, crewStatusMessage, crew);
-            }
-            else
-            {
-                ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, ConsoleStyle.ScaledWindowPaddingPx);
-                DrawStatusPane(instance, crewStatusMessage);
-                ImGui.PopStyleVar();
-            }
-            ConsoleStyle.PopWidgetStyle();
-            ConsoleStyle.EndBody();
-            ConsoleStyle.BeginFooter();
-            ConsoleStyle.FooterStatus("PHYSIOLOGICAL STATUS", pending: false);
-            ConsoleStyle.EndFooter();
-            ConsoleStyle.EndWindow();
-        }
-
+        _instance = instance;
+        _crewStatusMessage = crewStatusMessage;
+        _crew = crew;
         DrawCrewDetailWindows(crew);
     }
 
-    // Bottom area of the viewport work area, to the right of the stock left-side HUD column.
-    private static float2 InitialWindowPosition(float2 windowSize)
-    {
-        var viewport = ImGui.GetMainViewport();
-        return new float2(
-            viewport.WorkPos.X + viewport.WorkSize.X * WindowLeftFraction,
-            viewport.WorkPos.Y + viewport.WorkSize.Y - viewport.WorkSize.Y * WindowBottomFraction - windowSize.Y);
-    }
+    // Canvas sizes in screen UV fractions. The collapsed width shows only the status pane;
+    // half of expanded keeps the status pane the same width when toggling.
+    internal const float SizeUvXCollapsed = 0.245f;
+    internal const float SizeUvXExpanded = 0.49f;
+    internal const float SizeUvY = 0.28f;
+    internal const float SizeUvYDetails = 0.40f;
 
-    private void DrawCrewPanelToggle()
+    // Runs inside the GEffectsCanvas window during the gauge host scope; pos/size is the canvas rect in pixels.
+    internal void DrawCanvasContent(GEffectsCanvas canvas, float2 pos, float2 size)
     {
-        float buttonSize = ConsoleStyle.CloseButtonSizePx;
-        float2 windowPos = ImGui.GetWindowPos();
-        float2 windowSize = ImGui.GetWindowSize();
-        float2 buttonPos = new float2(
-            windowPos.X + windowSize.X
-                - ConsoleStyle.TitlebarHorizontalPaddingPx
-                - ConsoleStyle.CloseButtonSizePx
-                - ConsoleStyle.TitlebarSignatureGapPx
-                - buttonSize,
-            windowPos.Y + (ConsoleStyle.TitlebarHeight - buttonSize) * 0.5f);
-        float2 cursor = ImGui.GetCursorScreenPos();
-        ImGui.SetCursorScreenPos(buttonPos);
-        if (ConsoleWidgets.Button(_crewPanelOpen ? "<" : ">", "GFXCrewPanel", new float2(buttonSize, buttonSize)))
+        // Leave the gauge host scope while drawing: it pushes fonts and style vars scaled by
+        // gauge x resolution x canvas-content scale, and ConsoleWidgets re-push that scaled
+        // label font internally, so a single compensated push cannot cover them. Drawing
+        // outside the scope gives stock console window styling; re-entering below with the
+        // same hostScale keeps the scope stack balanced for the canvas.
+        float hostScale = MathF.Max(0.01f,
+            GameSettings.GetGaugeScale()
+            * ScreenReference.ResolutionScale()
+            * Math.Clamp(canvas.ContentScale, 0.6f, 3f));
+        ConsoleStyle.EndGaugeHostScope();
+        ConsoleStyle.PushLabelFont();
+
+        ConsoleStyle.DrawPanelBezel(pos, size, ImDrawFlags.RoundCornersAll, raised: false);
+
+        // Canvas windows have zero window padding; inset content by the stock console
+        // body margin so the panel fill forms a visible border, like the GameTime window.
+        float margin = ConsoleStyle.ContentPaddingPx;
+        float2 inset = new(margin, margin);
+        float headerHeight = ImGui.GetFrameHeight();
+        float2 bodySize = size - inset * 2f - new float2(0f, headerHeight + margin);
+        if (bodySize.X >= 40f && bodySize.Y >= 20f)
         {
-            _crewPanelOpen = !_crewPanelOpen;
-            _resizeOnNextFrame = true;
+            ImGui.GetWindowDrawList().AddText(
+                new float2(pos.X + margin, pos.Y + margin + (headerHeight - ImGui.GetTextLineHeight()) * 0.5f),
+                ConsoleStyle.TextMutedU32,
+                "G EFFECTS");
+
+            // Size the toggle exactly like DrawButtonCore does: text + horizontal button padding.
+            float2 toggleSize = new(
+                ImGui.CalcTextSize(">").X + ConsoleWidgets.ButtonHorizontalPaddingPx * 2f,
+                headerHeight);
+            ImGui.SetCursorScreenPos(new float2(pos.X + size.X - margin - toggleSize.X, pos.Y + margin));
+            if (ConsoleWidgets.Button(_crewPanelOpen ? "<" : ">"))
+            {
+                _crewPanelOpen = !_crewPanelOpen;
+                canvas.SetSizeUv(
+                    _crewPanelOpen ? SizeUvXExpanded : SizeUvXCollapsed,
+                    _expanded ? SizeUvYDetails : SizeUvY);
+            }
+            ImGuiHelper.DrawTooltip(_crewPanelOpen ? "Hide crew"u8 : "Show crew"u8, () => ImGui.IsItemHovered());
+
+            float2 bodyMin = new(pos.X + margin, pos.Y + margin + headerHeight + margin);
+            if (_crewPanelOpen)
+            {
+                DrawCrewLayout(canvas, _instance, _crewStatusMessage, _crew, bodyMin, bodySize);
+            }
+            else
+            {
+                ImGui.SetCursorScreenPos(bodyMin);
+                ImGui.BeginChild("##GEffectsStatusPane", bodySize, ImGuiChildFlags.None, ImGuiWindowFlags.NoBackground);
+                DrawStatusPane(canvas, _instance, _crewStatusMessage);
+                ImGui.EndChild();
+            }
         }
-        ImGui.SetCursorScreenPos(cursor);
+
+        ImGui.PopFont();
+        ConsoleStyle.BeginGaugeHostScope(hostScale);
     }
 
     private void DrawCrewLayout(
+        GEffectsCanvas canvas,
         KSAGEffectsLogicInstance? instance,
         string crewStatusMessage,
-        IReadOnlyList<KSAGEffectsLogicInstance> crew)
+        IReadOnlyList<KSAGEffectsLogicInstance> crew,
+        float2 bodyMin,
+        float2 bodySize)
     {
-        float2 avail = ImGui.GetContentRegionAvail();
         float gap = ConsoleStyle.ContentPaddingPx;
-        float statusWidth = (avail.X - gap) * 0.5f;
-        float rosterWidth = avail.X - statusWidth - gap;
-        float2 panePos = ImGui.GetCursorScreenPos();
+        float statusWidth = (bodySize.X - gap * 2f) * 0.5f;
+        float rosterWidth = bodySize.X - statusWidth - gap * 2f;
 
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, ConsoleStyle.ScaledWindowPaddingPx);
-        ImGui.BeginChild("##GEffectsStatusPane", new float2(statusWidth, avail.Y), ImGuiChildFlags.None, ImGuiWindowFlags.NoBackground);
-        ImGui.PopStyleVar();
-        DrawStatusPane(instance, crewStatusMessage);
+        ImGui.SetCursorScreenPos(bodyMin);
+        ImGui.BeginChild("##GEffectsStatusPane", new float2(statusWidth, bodySize.Y), ImGuiChildFlags.None, ImGuiWindowFlags.NoBackground);
+        DrawStatusPane(canvas, instance, crewStatusMessage);
         ImGui.EndChild();
 
-        ImGui.SetCursorScreenPos(new float2(panePos.X + statusWidth + gap, panePos.Y));
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, ConsoleStyle.ScaledWindowPaddingPx);
-        ImGui.BeginChild("##GEffectsCrewRoster", new float2(rosterWidth, avail.Y), ImGuiChildFlags.Borders, ImGuiWindowFlags.NoBackground);
-        ImGui.PopStyleVar();
+        // Vertical divider between the panes, same hairline style as ConsoleWidgets.Rule.
+        float dividerX = bodyMin.X + statusWidth + gap;
+        ImGui.GetWindowDrawList().AddLine(
+            new float2(dividerX, bodyMin.Y),
+            new float2(dividerX, bodyMin.Y + bodySize.Y),
+            ConsoleStyle.ApplyAlpha(ConsoleStyle.HairlineU32),
+            ConsoleStyle.WindowBorderThicknessPx);
+
+        ImGui.SetCursorScreenPos(new float2(dividerX + gap, bodyMin.Y));
+        ImGui.BeginChild("##GEffectsCrewRoster", new float2(rosterWidth, bodySize.Y), ImGuiChildFlags.None, ImGuiWindowFlags.NoBackground);
         DrawCrewRoster(crew, instance);
         ImGui.EndChild();
     }
 
-    private void DrawStatusPane(KSAGEffectsLogicInstance? instance, string crewStatusMessage)
+    private void DrawStatusPane(GEffectsCanvas canvas, KSAGEffectsLogicInstance? instance, string crewStatusMessage)
     {
         ConsoleWidgets.RegionHeader("CREW CONTROL");
         ImGui.TextWrapped(Fmt(crewStatusMessage));
@@ -173,13 +160,13 @@ internal sealed class GEffectsPlayerUi
             if (ConsoleWidgets.Button("Hide details"))
             {
                 _expanded = false;
-                _resizeOnNextFrame = true;
+                canvas.SetSizeUv(_crewPanelOpen ? SizeUvXExpanded : SizeUvXCollapsed, SizeUvY);
             }
         }
         else if (ConsoleWidgets.PrimaryButton("Show details"))
         {
             _expanded = true;
-            _resizeOnNextFrame = true;
+            canvas.SetSizeUv(_crewPanelOpen ? SizeUvXExpanded : SizeUvXCollapsed, SizeUvYDetails);
         }
     }
 

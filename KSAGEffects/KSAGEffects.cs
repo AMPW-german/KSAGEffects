@@ -21,6 +21,8 @@ namespace KSAGEffects
     {
         private readonly IModMenuService _modMenu;
         private readonly GEffectsPlayerUi _playerUi = new();
+        private GEffectsCanvas? _canvas;
+        private Mod? _mod;
         private readonly GEffectsDebugUi _debugUi = new();
         private IDisposable? _statusMenuItem;
         private IDisposable? _diagnosticsMenuItem;
@@ -94,7 +96,8 @@ namespace KSAGEffects
             harmony.PatchAll();
             new LogicLogging();
             GEffectsLogic.LogicSettings.DebugMode = false;
-            _statusMenuItem = _modMenu.AddModMenuItem("G Effects status", _playerUi.OpenExpanded);
+            _mod = definingMod;
+            _statusMenuItem = _modMenu.AddModMenuItem("G Effects status", OpenStatusCanvas);
             if (ReadDebugFlag())
                 _diagnosticsMenuItem = _modMenu.AddModMenuItem("G Effects diagnostics", () => _debugUi.IsOpen = true);
         }
@@ -104,6 +107,61 @@ namespace KSAGEffects
         {
             _statusMenuItem?.Dispose();
             _diagnosticsMenuItem?.Dispose();
+            // The canvas cannot be unregistered, so only hide it.
+            _canvas?.SetEnabled(false);
+            _canvas = null;
+        }
+
+        private void OpenStatusCanvas()
+        {
+            EnsureCanvas();
+            if (_canvas != null && !_canvas.Enabled)
+            {
+                _canvas.SetEnabled(true);
+                _canvas.MarkDirty();
+            }
+            _playerUi.OpenExpanded();
+        }
+
+        // Registers the status panel as a HUD gauge canvas so the layout system owns its
+        // position, size, and enabled state. Deferred until the gauge renderer exists.
+        private void EnsureCanvas()
+        {
+            if (_canvas != null || _mod == null)
+            {
+                return;
+            }
+            const string canvasId = "KSAGEffects";
+            foreach (GaugeCanvas existing in GaugeCanvas.AllCanvases)
+            {
+                if (existing is GEffectsCanvas ours && ours.Id == canvasId)
+                {
+                    ours.SetUi(_playerUi);
+                    _canvas = ours;
+                    return;
+                }
+            }
+            RendererContext context = Program.GetGaugeContext();
+            if (context == null)
+            {
+                return;
+            }
+            var canvas = new GEffectsCanvas(_playerUi)
+            {
+                Id = canvasId,
+                DisplayName = new StringReference { Value = "G EFFECTS" },
+                Anchor = new UvReference(0f, 1f),
+                Pivot = new UvReference(0f, 1f),
+                Offset = new UvReference(0.235f, -0.30f),
+                Size = new UvReference(GEffectsPlayerUi.SizeUvXCollapsed, GEffectsPlayerUi.SizeUvY),
+            };
+            canvas.OnDataLoad(_mod);
+            if (!ModLibrary.Register(canvas))
+            {
+                return;
+            }
+            canvas.PrepareCanvas(context);
+            _canvas = canvas;
         }
 
         private static bool ReadDebugFlag()
@@ -427,6 +485,7 @@ namespace KSAGEffects
         [StarMapAfterGui]
         public unsafe void AfterGui(double dt)
         {
+            EnsureCanvas();
             Vehicle? activeVehicle = Program.ControlledVehicle;
             bool probeCoreMode = false;
             CrewGState crewGState = activeVehicle == null ? CrewGState.NoCrew : EvaluateCrewGState(activeVehicle);
@@ -483,7 +542,7 @@ namespace KSAGEffects
                 _ when crewGState == CrewGState.AllUnconscious => "All assigned crew are G-unconscious; vessel control is unavailable.",
                 _ => "Vessel control is available; at least one crew member can still fly."
             };
-            _playerUi.Draw(activeVehicle, instance, crewStatus, crewInstances);
+            _playerUi.Draw(instance, crewStatus, crewInstances);
             _debugUi.Draw();
         }
 
